@@ -1,6 +1,50 @@
 import SwiftUI
 import Foundation
 
+// MARK: - Process Shell Executor (real implementation)
+
+public struct ProcessShellExecutor: ShellExecutor {
+    public init() {}
+
+    public func run(_ args: [String]) async throws -> ShellResult {
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/Applications/Docker.app/Contents/Resources/bin",
+        ]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+        process.environment = env
+
+        try process.run()
+
+        let outData = try await Task.detached {
+            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+        let errData = try await Task.detached {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+
+        process.waitUntilExit()
+
+        return ShellResult(
+            exitCode: Int(process.terminationStatus),
+            stdout: String(data: outData, encoding: .utf8) ?? "",
+            stderr: String(data: errData, encoding: .utf8) ?? ""
+        )
+    }
+}
+
 @MainActor
 public class OpenClawLauncher: ObservableObject {
     @Published public var steps: [LaunchStep] = []
@@ -29,6 +73,13 @@ public class OpenClawLauncher: ObservableObject {
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
     private let port: Int = 18789
     private var hasStarted = false
+    private let shellExecutor: ShellExecutor
+
+    // Configurable for testing (avoid 90s waits)
+    private let dockerRetryCount: Int
+    private let dockerRetryDelayNs: UInt64
+    private let gatewayRetryCount: Int
+    private let gatewayRetryDelayNs: UInt64
 
     private var stateDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -38,7 +89,23 @@ public class OpenClawLauncher: ObservableObject {
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
 
-    public init() {}
+    /// When true, suppresses real system side effects (opening browser, Docker.app, timers).
+    /// Used in integration tests.
+    public var suppressSideEffects = false
+
+    public init(
+        shell: ShellExecutor = ProcessShellExecutor(),
+        dockerRetryCount: Int = 45,
+        dockerRetryDelayNs: UInt64 = 2_000_000_000,
+        gatewayRetryCount: Int = 30,
+        gatewayRetryDelayNs: UInt64 = 1_000_000_000
+    ) {
+        self.shellExecutor = shell
+        self.dockerRetryCount = dockerRetryCount
+        self.dockerRetryDelayNs = dockerRetryDelayNs
+        self.gatewayRetryCount = gatewayRetryCount
+        self.gatewayRetryDelayNs = gatewayRetryDelayNs
+    }
 
     deinit {
         healthCheckTimer?.invalidate()
@@ -323,6 +390,10 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func openBrowser() {
+        guard !suppressSideEffects else {
+            addStep(.done, "Opened Control UI in browser")
+            return
+        }
         var urlString = "http://localhost:\(port)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
@@ -445,11 +516,12 @@ public class OpenClawLauncher: ObservableObject {
         if result == nil || result!.exitCode != 0 {
             // Try to start Docker Desktop
             addStep(.warning, "Docker not running. Starting Docker Desktop...")
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
+            if !suppressSideEffects {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
+            }
 
-            // Wait up to 90 seconds
-            for _ in 0..<45 {
-                try await Task.sleep(nanoseconds: 2_000_000_000)
+            for _ in 0..<dockerRetryCount {
+                try await Task.sleep(nanoseconds: dockerRetryDelayNs)
                 let check = try? await shell("docker", "info")
                 if check?.exitCode == 0 {
                     addStep(.done, "Docker is ready")
@@ -609,26 +681,10 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Pulling image...")
         pullProgressText = "Connecting..."
 
-        let exitCode = try await shellStreaming("docker", "pull", imageName) { [weak self] line in
-            guard let self = self else { return }
-            // Parse docker pull progress lines, e.g. "abc123: Downloading  52.3MB/100MB"
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                Task { @MainActor in
-                    // Show last meaningful line as progress
-                    if trimmed.contains("Pulling") || trimmed.contains("Downloading")
-                        || trimmed.contains("Extracting") || trimmed.contains("Verifying")
-                        || trimmed.contains("Pull complete") || trimmed.contains("Already exists")
-                        || trimmed.contains("Digest") || trimmed.contains("Status") {
-                        self.pullProgressText = String(trimmed.prefix(80))
-                    }
-                }
-            }
-        }
-
+        let pull = try await shell("docker", "pull", imageName)
         pullProgressText = nil
 
-        if exitCode == 0 {
+        if pull.exitCode == 0 {
             addStep(.done, "Docker image up to date")
             return
         }
@@ -640,7 +696,7 @@ public class OpenClawLauncher: ObservableObject {
             return
         }
 
-        throw LauncherError.pullFailed("Image pull failed")
+        throw LauncherError.pullFailed(pull.stderr.isEmpty ? "Image pull failed" : pull.stderr)
     }
 
     private func runContainer() async throws {
@@ -717,8 +773,8 @@ public class OpenClawLauncher: ObservableObject {
     private func waitForGateway() async throws {
         addStep(.running, "Waiting for Gateway to be ready...")
 
-        for _ in 0..<30 {
-            try await Task.sleep(nanoseconds: 1_000_000_000)
+        for _ in 0..<gatewayRetryCount {
+            try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
             let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
             if check?.exitCode == 0 {
                 addStep(.done, "Gateway is ready!")
@@ -733,6 +789,7 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Health Check
 
     private func startHealthCheck() {
+        guard !suppressSideEffects else { return }
         stopHealthCheck()
 
         uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -793,90 +850,7 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Shell Helper
 
     private func shell(_ args: String...) async throws -> ShellResult {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        var env = ProcessInfo.processInfo.environment
-        let extraPaths = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/Applications/Docker.app/Contents/Resources/bin",
-        ]
-        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-        process.environment = env
-
-        try process.run()
-
-        // Read pipes concurrently to avoid deadlock when output exceeds buffer
-        let outData = try await Task.detached {
-            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        }.value
-        let errData = try await Task.detached {
-            stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        }.value
-
-        process.waitUntilExit()
-
-        return ShellResult(
-            exitCode: Int(process.terminationStatus),
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? ""
-        )
+        try await shellExecutor.run(args)
     }
 
-    /// Run a command and call `onLine` for each line of combined stdout+stderr output.
-    private func shellStreaming(_ args: String..., onLine: @escaping (String) -> Void) async throws -> Int {
-        let process = Process()
-        let pipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = pipe
-        var env = ProcessInfo.processInfo.environment
-        let extraPaths = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/Applications/Docker.app/Contents/Resources/bin",
-        ]
-        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-        process.environment = env
-
-        try process.run()
-
-        // Read line by line in background
-        await Task.detached {
-            let handle = pipe.fileHandleForReading
-            var buffer = Data()
-            while true {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                buffer.append(chunk)
-                // Split on newlines
-                while let range = buffer.range(of: Data("\n".utf8)) {
-                    let lineData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
-                    buffer.removeSubrange(buffer.startIndex..<range.upperBound)
-                    if let line = String(data: lineData, encoding: .utf8) {
-                        onLine(line)
-                    }
-                }
-            }
-            // Remaining data
-            if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
-                onLine(line)
-            }
-        }.value
-
-        process.waitUntilExit()
-        return Int(process.terminationStatus)
-    }
 }
