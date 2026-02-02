@@ -284,7 +284,7 @@ final class LauncherIntegrationTests: XCTestCase {
     func testErrorStepsContainActionableMessages() async throws {
         let errors: [LauncherError] = [
             .dockerNotRunning,
-            .dockerInstallFailed("DMG mount failed"),
+            .dockerNotInstalled,
             .pullFailed("network unreachable"),
             .runFailed("port 18789 already in use"),
             .noToken,

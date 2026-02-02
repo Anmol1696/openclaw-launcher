@@ -346,6 +346,8 @@ struct SetupView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                } else if launcher.state == .error && launcher.needsDockerInstall {
+                    DockerInstallGuideView(launcher: launcher)
                 } else if launcher.state == .error {
                     HStack(spacing: 12) {
                         Button("Retry") {
@@ -452,6 +454,53 @@ struct OAuthCodeInputView: View {
                     .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Back") { launcher.state = .needsAuth }
                     .buttonStyle(.bordered).controlSize(.large)
+            }
+        }
+    }
+}
+
+// MARK: - Docker Install Guide
+
+struct DockerInstallGuideView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.down.app.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.blue)
+
+            Text("Docker Desktop Required")
+                .font(.system(size: 16, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Download & install Docker Desktop", systemImage: "1.circle.fill")
+                Label("Open Docker Desktop and wait for it to start", systemImage: "2.circle.fill")
+                Label("Come back here and tap Retry", systemImage: "3.circle.fill")
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+
+            VStack(spacing: 10) {
+                Button(action: {
+                    NSWorkspace.shared.open(URL(string: "https://www.docker.com/products/docker-desktop/")!)
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle")
+                        Text("Download Docker Desktop")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button("Retry") {
+                    launcher.start()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
         }
     }
