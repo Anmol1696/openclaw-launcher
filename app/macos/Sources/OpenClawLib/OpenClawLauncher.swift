@@ -62,6 +62,7 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var containerLogs: String = ""
     @Published public var showLogSheet: Bool = false
     @Published public var showResetConfirm: Bool = false
+    @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
 
     private var isFirstRun = false
@@ -149,6 +150,7 @@ public class OpenClawLauncher: ObservableObject {
         guard !hasStarted || state == .stopped || state == .error else { return }
         hasStarted = true
         steps = []
+        needsDockerInstall = false
         state = .working
         menuBarStatus = .starting
 
@@ -171,6 +173,10 @@ public class OpenClawLauncher: ObservableObject {
 
                 try await continueAfterSetup()
             } catch {
+                if let launcherError = error as? LauncherError,
+                   case .dockerNotInstalled = launcherError {
+                    needsDockerInstall = true
+                }
                 addStep(.error, error.localizedDescription)
                 state = .error
                 menuBarStatus = .stopped
@@ -511,9 +517,9 @@ public class OpenClawLauncher: ObservableObject {
         // Check if Docker.app is installed
         let dockerAppExists = FileManager.default.fileExists(atPath: "/Applications/Docker.app")
 
-        // If neither exists, download and install Docker Desktop
+        // If neither exists, prompt user to install
         if !dockerCliExists && !dockerAppExists {
-            try await installDocker()
+            throw LauncherError.dockerNotInstalled
         }
 
         let result = try? await shell("docker", "info")
@@ -536,71 +542,6 @@ public class OpenClawLauncher: ObservableObject {
         }
 
         addStep(.done, "Docker is ready")
-    }
-
-    private func installDocker() async throws {
-        addStep(.running, "Docker Desktop not found. Downloading...")
-
-        // Detect architecture
-        let arch = try await shell("uname", "-m")
-        let archString = arch.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dmgURL: URL
-        if archString == "arm64" {
-            dmgURL = URL(string: "https://desktop.docker.com/mac/main/arm64/Docker.dmg")!
-        } else {
-            dmgURL = URL(string: "https://desktop.docker.com/mac/main/amd64/Docker.dmg")!
-        }
-
-        // Download DMG to temp directory
-        let tempDir = FileManager.default.temporaryDirectory
-        let dmgPath = tempDir.appendingPathComponent("Docker.dmg")
-
-        // Clean up any previous download
-        try? FileManager.default.removeItem(at: dmgPath)
-
-        addStep(.running, "Downloading Docker Desktop (\(archString))... This may take a few minutes.")
-
-        let (downloadedURL, _) = try await URLSession.shared.download(from: dmgURL)
-        try FileManager.default.moveItem(at: downloadedURL, to: dmgPath)
-
-        addStep(.done, "Download complete")
-        addStep(.running, "Installing Docker Desktop...")
-
-        // Mount DMG
-        let mount = try await shell("hdiutil", "attach", "-nobrowse", "-quiet", dmgPath.path)
-        if mount.exitCode != 0 {
-            throw LauncherError.dockerInstallFailed("Failed to mount DMG: \(mount.stderr.prefix(200))")
-        }
-
-        // Find the mounted volume
-        let volumePath = "/Volumes/Docker"
-        let sourceApp = "\(volumePath)/Docker.app"
-
-        guard FileManager.default.fileExists(atPath: sourceApp) else {
-            _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-            throw LauncherError.dockerInstallFailed("Docker.app not found in mounted DMG")
-        }
-
-        // Copy to /Applications — try direct copy first
-        let copy = try await shell("/bin/cp", "-R", sourceApp, "/Applications/Docker.app")
-        if copy.exitCode != 0 {
-            // Need admin privileges — use osascript to prompt
-            addStep(.warning, "Requesting administrator permission to install...")
-            let adminCopy = try await shell(
-                "osascript", "-e",
-                "do shell script \"cp -R '\(sourceApp)' '/Applications/Docker.app'\" with administrator privileges"
-            )
-            if adminCopy.exitCode != 0 {
-                _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-                throw LauncherError.dockerInstallFailed("Installation cancelled or failed: \(adminCopy.stderr.prefix(200))")
-            }
-        }
-
-        // Detach DMG and clean up
-        _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-        try? FileManager.default.removeItem(at: dmgPath)
-
-        addStep(.done, "Docker Desktop installed")
     }
 
     private func migrateOldStateDir() {

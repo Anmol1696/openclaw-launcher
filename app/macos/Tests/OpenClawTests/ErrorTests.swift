@@ -6,7 +6,7 @@ final class ErrorTests: XCTestCase {
     func testAllErrorCasesHaveDescriptions() {
         let cases: [LauncherError] = [
             .dockerNotRunning,
-            .dockerInstallFailed("test"),
+            .dockerNotInstalled,
             .pullFailed("test"),
             .runFailed("test"),
             .noToken,
@@ -37,7 +37,7 @@ final class ErrorTests: XCTestCase {
             "Should mention container")
 
         XCTAssertTrue(
-            LauncherError.dockerInstallFailed("reason").errorDescription!.contains("reason"),
-            "Should include the failure reason")
+            LauncherError.dockerNotInstalled.errorDescription!.contains("Docker Desktop"),
+            "Should mention Docker Desktop")
     }
 }
