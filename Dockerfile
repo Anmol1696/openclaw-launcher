@@ -22,9 +22,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && rm -rf /usr/share/doc /usr/share/man
 
-# Non-root user
+# Add node user to openclaw group
 RUN groupadd -r openclaw \
-    && useradd -r -g openclaw -m -d /home/node -s /usr/sbin/nologin node
+    && usermod -a -G openclaw node
 
 # Copy only OpenClaw from builder (no npm cache, no build tools)
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
