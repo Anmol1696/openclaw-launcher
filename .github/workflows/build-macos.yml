@@ -1,0 +1,48 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/macos/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/macos/**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+      - name: Build Swift
+        working-directory: app/macos
+        run: swift build -c release
+
+      - name: Create .app bundle and .dmg
+        working-directory: app/macos
+        run: bash build.sh
+
+      - name: Upload .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenClaw.app
+          path: dist/OpenClaw.app
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenClaw.dmg
+          path: dist/OpenClaw.dmg
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/OpenClaw.dmg

@@ -1,0 +1,14 @@
+# Swift
+.build/
+.swiftpm/
+
+# Build output
+dist/
+
+# macOS
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+
+# Environment
+.env

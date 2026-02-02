@@ -187,6 +187,7 @@ class OpenClawLauncher: ObservableObject {
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/anmol1696/openclaw:latest"
     private let port: Int = 18789
+    private var hasStarted = false
 
     private var stateDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -199,6 +200,8 @@ class OpenClawLauncher: ObservableObject {
     // MARK: - Public
 
     func start() {
+        guard !hasStarted || state == .stopped || state == .error else { return }
+        hasStarted = true
         steps = []
         state = .working
 
@@ -235,15 +238,17 @@ class OpenClawLauncher: ObservableObject {
     }
 
     func viewLogs() {
-        // Open Console.app or a log window — for now, copy command
-        let command = "docker logs -f \(containerName)"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
-        addStep(.done, "Log command copied. Paste in Terminal: \(command)")
+        let script = "tell application \"Terminal\" to do script \"docker logs -f \(containerName)\""
+        let appleScript = NSAppleScript(source: script)
+        appleScript?.executeAndReturnError(nil)
+        addStep(.done, "Opened logs in Terminal")
     }
 
     func addStep(_ status: StepStatus, _ message: String) {
         steps.append(LaunchStep(status: status, message: message))
+        if steps.count > 50 {
+            steps.removeFirst(steps.count - 50)
+        }
     }
 
     // MARK: - Steps
@@ -301,28 +306,28 @@ class OpenClawLauncher: ObservableObject {
 
         // Write minimal config
         let config = """
-        {
-          "gateway": {
-            "mode": "local",
-            "bind": "lan",
-            "auth": { "mode": "token" },
-            "controlUi": {
-              "enabled": true,
-              "allowInsecureAuth": true
-            },
-            "http": {
-              "endpoints": {
-                "chatCompletions": { "enabled": true }
-              }
-            }
-          },
-          "agents": {
-            "defaults": {
-              "workspace": "/home/node/.openclaw/workspace"
-            }
-          }
-        }
-        """
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": { "mode": "token" },
+    "controlUi": {
+      "enabled": true,
+      "allowInsecureAuth": true
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": { "enabled": true }
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace"
+    }
+  }
+}
+"""
         let configFile = configDir.appendingPathComponent("openclaw.json")
         try config.write(to: configFile, atomically: true, encoding: .utf8)
 
@@ -330,22 +335,22 @@ class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        // Check if image exists locally
-        let inspect = try? await shell("docker", "image", "inspect", imageName)
-        if inspect?.exitCode == 0 {
-            addStep(.done, "Docker image ready")
+        addStep(.running, "Checking for image updates...")
+
+        let pull = try await shell("docker", "pull", imageName)
+        if pull.exitCode == 0 {
+            addStep(.done, "Docker image up to date")
             return
         }
 
-        addStep(.running, "Pulling Docker image...")
-
-        let pull = try await shell("docker", "pull", imageName)
-
-        if pull.exitCode != 0 {
-            throw LauncherError.pullFailed(pull.stderr)
+        // Pull failed — check if we have a local copy to fall back on
+        let inspect = try? await shell("docker", "image", "inspect", imageName)
+        if inspect?.exitCode == 0 {
+            addStep(.warning, "Couldn't check for updates (offline?). Using cached image.")
+            return
         }
 
-        addStep(.done, "Docker image pulled")
+        throw LauncherError.pullFailed(pull.stderr)
     }
 
     private func runContainer() async throws {
@@ -354,8 +359,8 @@ class OpenClawLauncher: ObservableObject {
         }
 
         // Check if already running
-        let ps = try? await shell("docker", "ps", "--format", "{{.Names}}")
-        if let output = ps?.stdout, output.contains(containerName) {
+        let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}")
+        if let output = ps?.stdout, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             addStep(.done, "Container already running")
             return
         }
@@ -388,7 +393,6 @@ class OpenClawLauncher: ObservableObject {
             "--cap-drop", "ALL",                        // drop ALL Linux capabilities
             "--cap-add", "NET_BIND_SERVICE",            // only allow binding ports
             "--security-opt", "no-new-privileges:true", // prevent privilege escalation
-            "--security-opt", "seccomp=unconfined",     // needed for Node.js (or use custom profile)
 
             // --- Network ---
             "-p", "127.0.0.1:\(port):18789",           // LOCALHOST ONLY — not exposed to network
@@ -437,37 +441,42 @@ class OpenClawLauncher: ObservableObject {
 
     private func generateSecureToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        }
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private func shell(_ args: String...) async throws -> ShellResult {
         let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
-        process.standardOutput = stdout
-        process.standardError = stderr
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
         process.environment = ProcessInfo.processInfo.environment
 
-        return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { proc in
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: ShellResult(
-                    exitCode: Int(proc.terminationStatus),
-                    stdout: String(data: outData, encoding: .utf8) ?? "",
-                    stderr: String(data: errData, encoding: .utf8) ?? ""
-                ))
-            }
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        try process.run()
+
+        // Read pipes concurrently to avoid deadlock when output exceeds buffer
+        let outData = try await Task.detached {
+            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+        let errData = try await Task.detached {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+
+        process.waitUntilExit()
+
+        return ShellResult(
+            exitCode: Int(process.terminationStatus),
+            stdout: String(data: outData, encoding: .utf8) ?? "",
+            stderr: String(data: errData, encoding: .utf8) ?? ""
+        )
     }
 }
 
