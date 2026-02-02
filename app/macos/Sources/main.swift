@@ -359,7 +359,7 @@ class OpenClawLauncher: ObservableObject {
 
     private var stateDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".openclaw-docker")
+            .appendingPathComponent(".openclaw-launcher")
     }
     private var configDir: URL { stateDir.appendingPathComponent("config") }
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
@@ -419,6 +419,7 @@ class OpenClawLauncher: ObservableObject {
             }
             """
             try? json.write(to: authFile, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
             addStep(.done, "API key saved")
         } else {
             addStep(.warning, "Skipped API key — set up later in Control UI")
@@ -666,7 +667,19 @@ class OpenClawLauncher: ObservableObject {
         addStep(.done, "Docker Desktop installed")
     }
 
+    private func migrateOldStateDir() {
+        let oldDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".openclaw-docker")
+        if FileManager.default.fileExists(atPath: oldDir.path)
+            && !FileManager.default.fileExists(atPath: stateDir.path) {
+            try? FileManager.default.moveItem(at: oldDir, to: stateDir)
+            print("[OpenClaw] Migrated ~/.openclaw-docker → ~/.openclaw-launcher")
+        }
+    }
+
     private func firstRunSetup() async throws {
+        migrateOldStateDir()
+
         // Load existing token if present
         if FileManager.default.fileExists(atPath: envFile.path) {
             let content = try String(contentsOf: envFile, encoding: .utf8)
@@ -691,8 +704,9 @@ class OpenClawLauncher: ObservableObject {
         gatewayToken = token
 
         // Write .env
-        let env = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
-        try env.write(to: envFile, atomically: true, encoding: .utf8)
+        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
+        try envContent.write(to: envFile, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envFile.path)
 
         // Write config with actual token value
         let config = """
@@ -706,9 +720,7 @@ class OpenClawLauncher: ObservableObject {
     },
     "controlUi": {
       "enabled": true,
-      "allowInsecureAuth": true,
-      "basePath": "/openclaw",
-      "dangerouslyDisableDeviceAuth": true
+      "basePath": "/openclaw"
     }
   },
   "agents": {
@@ -721,6 +733,7 @@ class OpenClawLauncher: ObservableObject {
 """
         let configFile = configDir.appendingPathComponent("openclaw.json")
         try config.write(to: configFile, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFile.path)
 
         // Create agent directories
         let agentDir = configDir.appendingPathComponent("agents/default/agent")
@@ -751,7 +764,7 @@ class OpenClawLauncher: ObservableObject {
     }
 
     private func runContainer() async throws {
-        guard let token = gatewayToken else {
+        guard gatewayToken != nil else {
             throw LauncherError.noToken
         }
 
@@ -801,7 +814,7 @@ class OpenClawLauncher: ObservableObject {
             // --- Environment ---
             "-e", "HOME=/home/node",
             "-e", "TERM=xterm-256color",
-            "-e", "OPENCLAW_GATEWAY_TOKEN=\(token)",
+            "--env-file", envFile.path,
             "-e", "NODE_ENV=production",
 
             // --- Restart policy ---
@@ -913,7 +926,7 @@ enum LauncherError: LocalizedError {
         case .runFailed(let msg):
             return "Failed to start container: \(msg.prefix(200))"
         case .noToken:
-            return "Gateway token not generated. Try resetting: rm -rf ~/.openclaw-docker"
+            return "Gateway token not generated. Try resetting: rm -rf ~/.openclaw-launcher"
         }
     }
 }
