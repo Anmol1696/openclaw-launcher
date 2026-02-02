@@ -2,20 +2,21 @@
 
 Multi-stage Dockerfile that extends the upstream
 [`ghcr.io/openclaw/openclaw`](https://github.com/openclaw/openclaw) image,
-strips build tooling (~200MB+ of compilers and dev headers), and layers on
+strips build tooling (~940MB of compilers and dev headers), and layers on
 useful runtime tools.
 
 ## Flavors
 
-| Flavor | Target | What's included | Est. image size |
-|--------|--------|----------------|-----------------|
-| **base** | `base` | jq, ripgrep, fd, sqlite3 | ~350 MB |
-| **lite** | `lite` | base + Python 3, pandas, matplotlib, Pillow | ~700 MB |
-| **full** | `full` | lite + ffmpeg, Playwright + Chromium | ~1.4 GB |
+| Flavor | Target | What's included | Image size |
+|--------|--------|----------------|------------|
+| **base** | `base` | jq, ripgrep, fd, sqlite3 | 1.65 GB |
+| **lite** | `lite` | base + Python 3, pandas, matplotlib, Pillow | 1.96 GB |
+| **full** | `full` | lite + ffmpeg, Playwright + Chromium | 3.28 GB |
+| *upstream* | — | *build tools included, no extra CLI tools* | *2.59 GB* |
 
-Compared to the upstream image (~800MB with build tools), **base** is
-significantly smaller because it copies only the built app into
-`node:22-bookworm-slim` and drops gcc, g++, bun, pnpm cache, and dev headers.
+**base** is ~940MB smaller than upstream despite adding extra tools, because the
+multi-stage build copies only the built app into `node:22-bookworm-slim` and
+drops gcc, g++, bun, pnpm cache, and dev headers.
 
 ## What's stripped from upstream
 
@@ -105,4 +106,5 @@ export OPENCLAW_FLAVOR=lite
 ./run.sh
 ```
 
-The macOS app uses `base` by default.
+The macOS app currently uses the upstream image. Custom flavor selection and
+bring-your-own-image support are coming in a future release via advanced settings.
