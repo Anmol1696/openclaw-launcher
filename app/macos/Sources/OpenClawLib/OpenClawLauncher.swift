@@ -1,354 +1,14 @@
-// ============================================================================
-//  OpenClaw Launcher — Native macOS App (SwiftUI)
-//
-//  Zero terminal. User double-clicks → sees a small native window →
-//  Docker runs in background → browser opens with Control UI.
-//
-//  Build: swiftc -o OpenClawLauncher main.swift (or use Xcode)
-//  Or use the Package.swift to build via `swift build`
-// ============================================================================
-
 import SwiftUI
 import Foundation
-import CryptoKit
-
-// MARK: - Anthropic OAuth (PKCE)
-
-private extension Data {
-    func base64URLEncodedString() -> String {
-        self.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}
-
-enum AnthropicOAuth {
-    static let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    private static let authorizeURL = URL(string: "https://claude.ai/oauth/authorize")!
-    private static let tokenURL = URL(string: "https://console.anthropic.com/v1/oauth/token")!
-    private static let redirectURI = "https://console.anthropic.com/oauth/code/callback"
-    private static let scopes = "org:create_api_key user:profile user:inference"
-
-    struct PKCE {
-        let verifier: String
-        let challenge: String
-    }
-
-    static func generatePKCE() throws -> PKCE {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        guard status == errSecSuccess else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
-        let verifier = Data(bytes).base64URLEncodedString()
-        let hash = SHA256.hash(data: Data(verifier.utf8))
-        let challenge = Data(hash).base64URLEncodedString()
-        return PKCE(verifier: verifier, challenge: challenge)
-    }
-
-    static func buildAuthorizeURL(pkce: PKCE) -> URL {
-        var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            URLQueryItem(name: "code", value: "true"),
-            URLQueryItem(name: "client_id", value: clientId),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "scope", value: scopes),
-            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: pkce.verifier),
-        ]
-        return components.url!
-    }
-
-    static func exchangeCode(code: String, verifier: String) async throws -> OAuthCredentials {
-        let payload: [String: Any] = [
-            "grant_type": "authorization_code",
-            "client_id": clientId,
-            "code": code,
-            "state": verifier,
-            "redirect_uri": redirectURI,
-            "code_verifier": verifier,
-        ]
-        let body = try JSONSerialization.data(withJSONObject: payload)
-
-        var request = URLRequest(url: tokenURL)
-        request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let text = String(data: data, encoding: .utf8) ?? "<error>"
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            print("[OpenClaw] Token exchange failed (HTTP \(status)): \(text)")
-            throw NSError(domain: "AnthropicOAuth", code: status,
-                          userInfo: [NSLocalizedDescriptionKey: "Token exchange failed: \(text)"])
-        }
-
-        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let access = decoded?["access_token"] as? String,
-              let refresh = decoded?["refresh_token"] as? String,
-              let expiresIn = decoded?["expires_in"] as? Double else {
-            throw NSError(domain: "AnthropicOAuth", code: 0,
-                          userInfo: [NSLocalizedDescriptionKey: "Unexpected token response"])
-        }
-
-        let expiresAtMs = Int64(Date().timeIntervalSince1970 * 1000) + Int64(expiresIn * 1000) - Int64(5 * 60 * 1000)
-        return OAuthCredentials(type: "oauth", refresh: refresh, access: access, expires: expiresAtMs)
-    }
-}
-
-struct OAuthCredentials {
-    let type: String
-    let refresh: String
-    let access: String
-    let expires: Int64
-}
-
-// MARK: - App Entry Point
-
-@main
-struct OpenClawApp: App {
-    @StateObject private var launcher = OpenClawLauncher()
-
-    var body: some Scene {
-        WindowGroup {
-            LauncherView(launcher: launcher)
-                .frame(width: 480, height: 520)
-                .onAppear { launcher.start() }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-    }
-}
-
-// MARK: - Main View
-
-struct LauncherView: View {
-    @ObservedObject var launcher: OpenClawLauncher
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 8) {
-                Text("🐙")
-                    .font(.system(size: 48))
-                Text("OpenClawLauncher")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("Isolated AI Agent • Docker Powered")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 32)
-            .padding(.bottom, 24)
-
-            Divider()
-
-            // Status steps
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(launcher.steps) { step in
-                        StepRow(step: step)
-                    }
-                }
-                .padding(20)
-            }
-
-            Divider()
-
-            // Bottom actions
-            VStack(spacing: 12) {
-                if launcher.state == .running {
-                    // Token display
-                    if let token = launcher.gatewayToken {
-                        HStack {
-                            Text("Token:")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(token.prefix(16) + "...")
-                                .font(.system(size: 12, design: .monospaced))
-                                .textSelection(.enabled)
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(token, forType: .string)
-                                launcher.addStep(.done, "Token copied to clipboard")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        Button("Open Control UI") {
-                            launcher.openBrowser()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-
-                        Button("Stop") {
-                            launcher.stopContainer()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                    }
-                } else if launcher.state == .needsAuth {
-                    VStack(spacing: 12) {
-                        Text("Authentication")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Choose how to connect to Anthropic.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-
-                        VStack(spacing: 8) {
-                            Button("Sign in with Claude") {
-                                launcher.startOAuth()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-
-                            Button("Use API Key") {
-                                launcher.showApiKeyInput()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-
-                            Button("Skip") {
-                                launcher.skipAuth()
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 12))
-                        }
-                    }
-                } else if launcher.state == .waitingForOAuthCode {
-                    VStack(spacing: 12) {
-                        if launcher.showApiKeyField {
-                            Text("API Key Setup")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Enter your Anthropic API key.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            SecureField("sk-ant-...", text: $launcher.apiKeyInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(maxWidth: 360)
-                            HStack(spacing: 12) {
-                                Button("Continue") { launcher.submitApiKey() }
-                                    .buttonStyle(.borderedProminent).controlSize(.large)
-                                Button("Back") { launcher.state = .needsAuth }
-                                    .buttonStyle(.bordered).controlSize(.large)
-                            }
-                        } else {
-                            Text("Paste Authorization Code")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Sign in on the browser page that opened,\nthen copy the code and paste it below.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                            TextField("Paste code or URL here...", text: $launcher.oauthCodeInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(maxWidth: 360)
-                            HStack(spacing: 12) {
-                                Button("Exchange") { launcher.exchangeOAuthCode() }
-                                    .buttonStyle(.borderedProminent).controlSize(.large)
-                                    .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                Button("Back") { launcher.state = .needsAuth }
-                                    .buttonStyle(.bordered).controlSize(.large)
-                            }
-                        }
-                    }
-                } else if launcher.state == .stopped {
-                    Button("Start OpenClawLauncher") {
-                        launcher.start()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                } else if launcher.state == .error {
-                    HStack(spacing: 12) {
-                        Button("Retry") {
-                            launcher.start()
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        Button("View Logs") {
-                            launcher.viewLogs()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                } else {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Setting up...")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(20)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-}
-
-struct StepRow: View {
-    let step: LaunchStep
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Group {
-                switch step.status {
-                case .pending:
-                    Image(systemName: "circle")
-                        .foregroundStyle(.secondary)
-                case .running:
-                    ProgressView()
-                        .scaleEffect(0.6)
-                        .frame(width: 16, height: 16)
-                case .done:
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                case .error:
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                case .warning:
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-            }
-            .frame(width: 18)
-
-            Text(step.message)
-                .font(.system(size: 13))
-                .foregroundStyle(step.status == .error ? .red : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-// MARK: - Data Models
-
-enum StepStatus { case pending, running, done, error, warning }
-
-enum LauncherState { case idle, working, needsAuth, waitingForOAuthCode, running, stopped, error }
-
-struct LaunchStep: Identifiable {
-    let id = UUID()
-    let status: StepStatus
-    let message: String
-}
-
-// MARK: - Launcher Logic
 
 @MainActor
-class OpenClawLauncher: ObservableObject {
-    @Published var steps: [LaunchStep] = []
-    @Published var state: LauncherState = .idle
-    @Published var gatewayToken: String?
-    @Published var apiKeyInput: String = ""
-    @Published var oauthCodeInput: String = ""
-    @Published var showApiKeyField: Bool = false
+public class OpenClawLauncher: ObservableObject {
+    @Published public var steps: [LaunchStep] = []
+    @Published public var state: LauncherState = .idle
+    @Published public var gatewayToken: String?
+    @Published public var apiKeyInput: String = ""
+    @Published public var oauthCodeInput: String = ""
+    @Published public var showApiKeyField: Bool = false
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
 
@@ -365,9 +25,11 @@ class OpenClawLauncher: ObservableObject {
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
 
+    public init() {}
+
     // MARK: - Public
 
-    func start() {
+    public func start() {
         guard !hasStarted || state == .stopped || state == .error else { return }
         hasStarted = true
         steps = []
@@ -392,7 +54,7 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
-    func stopContainer() {
+    public func stopContainer() {
         Task {
             addStep(.running, "Stopping OpenClawLauncher...")
             _ = try? await shell("docker", "stop", containerName)
@@ -401,7 +63,7 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
-    func submitApiKey() {
+    public func submitApiKey() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty {
             let authDir = configDir.appendingPathComponent("agents/default/agent")
@@ -436,7 +98,7 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
-    func startOAuth() {
+    public func startOAuth() {
         do {
             let pkce = try AnthropicOAuth.generatePKCE()
             currentPKCE = pkce
@@ -451,13 +113,13 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
-    func showApiKeyInput() {
+    public func showApiKeyInput() {
         showApiKeyField = true
         apiKeyInput = ""
         state = .waitingForOAuthCode
     }
 
-    func skipAuth() {
+    public func skipAuth() {
         addStep(.warning, "Skipped auth — set up later in Control UI")
         state = .working
         Task {
@@ -466,7 +128,7 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
-    func exchangeOAuthCode() {
+    public func exchangeOAuthCode() {
         guard let pkce = currentPKCE else {
             addStep(.error, "No PKCE session. Try signing in again.")
             state = .needsAuth
@@ -540,7 +202,7 @@ class OpenClawLauncher: ObservableObject {
         return FileManager.default.fileExists(atPath: authFile.path)
     }
 
-    func openBrowser() {
+    public func openBrowser() {
         var urlString = "http://localhost:\(port)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
@@ -550,18 +212,30 @@ class OpenClawLauncher: ObservableObject {
         addStep(.done, "Opened Control UI in browser")
     }
 
-    func viewLogs() {
+    public func viewLogs() {
         let script = "tell application \"Terminal\" to do script \"docker logs -f \(containerName)\""
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(nil)
         addStep(.done, "Opened logs in Terminal")
     }
 
-    func addStep(_ status: StepStatus, _ message: String) {
+    public func addStep(_ status: StepStatus, _ message: String) {
         steps.append(LaunchStep(status: status, message: message))
         if steps.count > 50 {
             steps.removeFirst(steps.count - 50)
         }
+    }
+
+    // MARK: - Token Generation
+
+    public func generateSecureToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+                + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Steps
@@ -850,17 +524,7 @@ class OpenClawLauncher: ObservableObject {
         addStep(.warning, "Gateway is still starting. Try opening the browser anyway.")
     }
 
-    // MARK: - Helpers
-
-    private func generateSecureToken() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        guard status == errSecSuccess else {
-            return UUID().uuidString.replacingOccurrences(of: "-", with: "")
-                + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        }
-        return bytes.map { String(format: "%02x", $0) }.joined()
-    }
+    // MARK: - Shell Helper
 
     private func shell(_ args: String...) async throws -> ShellResult {
         let process = Process()
@@ -899,34 +563,5 @@ class OpenClawLauncher: ObservableObject {
             stdout: String(data: outData, encoding: .utf8) ?? "",
             stderr: String(data: errData, encoding: .utf8) ?? ""
         )
-    }
-}
-
-struct ShellResult {
-    let exitCode: Int
-    let stdout: String
-    let stderr: String
-}
-
-enum LauncherError: LocalizedError {
-    case dockerNotRunning
-    case dockerInstallFailed(String)
-    case pullFailed(String)
-    case runFailed(String)
-    case noToken
-
-    var errorDescription: String? {
-        switch self {
-        case .dockerNotRunning:
-            return "Docker Desktop is not running. Please start it and try again."
-        case .dockerInstallFailed(let msg):
-            return "Failed to install Docker Desktop: \(msg)"
-        case .pullFailed(let msg):
-            return "Failed to pull Docker image: \(msg.prefix(200))"
-        case .runFailed(let msg):
-            return "Failed to start container: \(msg.prefix(200))"
-        case .noToken:
-            return "Gateway token not generated. Try resetting: rm -rf ~/.openclaw-launcher"
-        }
     }
 }
