@@ -93,22 +93,11 @@ EOF
   "gateway": {
     "mode": "local",
     "bind": "lan",
-    "auth": {
-      "mode": "token"
-    },
     "controlUi": {
       "enabled": true,
-      "allowInsecureAuth": true
-    },
-    "http": {
-      "endpoints": {
-        "chatCompletions": { "enabled": true }
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "workspace": "/home/node/.openclaw/workspace"
+      "allowInsecureAuth": true,
+      "basePath": "/openclaw",
+      "dangerouslyDisableDeviceAuth": true
     }
   }
 }
@@ -199,7 +188,7 @@ run_container() {
 # ============================================================================
 open_browser() {
     source "$ENV_FILE"
-    local url="http://localhost:${OPENCLAW_PORT}"
+    local url="http://localhost:${OPENCLAW_PORT}/openclaw?token=${OPENCLAW_GATEWAY_TOKEN}&onboarding=1"
 
     echo ""
     echo -e "   ${CYAN}Control UI:${NC}  $url"

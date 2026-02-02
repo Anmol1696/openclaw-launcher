@@ -232,7 +232,11 @@ class OpenClawLauncher: ObservableObject {
     }
 
     func openBrowser() {
-        let url = URL(string: "http://localhost:\(port)")!
+        var urlString = "http://localhost:\(port)/openclaw"
+        if let token = gatewayToken {
+            urlString += "?token=\(token)&onboarding=1"
+        }
+        let url = URL(string: urlString)!
         NSWorkspace.shared.open(url)
         addStep(.done, "Opened Control UI in browser")
     }
@@ -313,7 +317,8 @@ class OpenClawLauncher: ObservableObject {
     "auth": { "mode": "token" },
     "controlUi": {
       "enabled": true,
-      "allowInsecureAuth": true
+      "allowInsecureAuth": true,
+      "basePath": "/openclaw"
     },
     "http": {
       "endpoints": {
