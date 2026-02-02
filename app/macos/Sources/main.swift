@@ -107,12 +107,6 @@ struct OAuthCredentials {
 // MARK: - Gateway Status
 
 struct GatewayStatus: Codable {
-    struct ChannelStatus: Codable {
-        let enabled: Bool
-        let connected: Bool?
-    }
-    
-    let channels: [String: ChannelStatus]?
     let uptime: Int?
 }
 
@@ -126,6 +120,7 @@ struct OpenClawApp: App {
         WindowGroup {
             LauncherView(launcher: launcher)
                 .frame(width: 520, height: launcher.state == .running ? 580 : 520)
+                .animation(.easeInOut(duration: 0.25), value: launcher.state)
                 .onAppear { launcher.start() }
         }
         .windowStyle(.hiddenTitleBar)
@@ -175,9 +170,10 @@ struct MenuBarContent: View {
         
         Button("Show Window") {
             NSApp.activate(ignoringOtherApps: true)
-            if let window = NSApp.windows.first {
-                window.makeKeyAndOrderFront(nil)
-            }
+            // Find the launcher window (skip menu bar extra windows)
+            let window = NSApp.windows.first { $0.contentView != nil && $0.title != "" }
+                ?? NSApp.windows.first
+            window?.makeKeyAndOrderFront(nil)
         }
         
         Divider()
@@ -260,22 +256,17 @@ struct DashboardView: View {
                     }
                 }
                 
-                // Channel Status Cards
-                if let status = launcher.gatewayStatusData {
-                    if let channels = status.channels {
-                        VStack(spacing: 12) {
-                            ForEach(["web", "telegram", "whatsapp"], id: \.self) { channel in
-                                if let channelStatus = channels[channel] {
-                                    ChannelCard(
-                                        name: channel.capitalized,
-                                        enabled: channelStatus.enabled,
-                                        connected: channelStatus.connected ?? false
-                                    )
-                                }
-                            }
-                        }
-                    }
+                // Tip card
+                HStack(spacing: 10) {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundStyle(.yellow)
+                    Text("Configure channels, agents, and settings in the Control UI.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
                 
                 // Quick Actions
                 VStack(spacing: 12) {
@@ -375,50 +366,6 @@ struct StatusCard<Content: View>: View {
     }
 }
 
-struct ChannelCard: View {
-    let name: String
-    let enabled: Bool
-    let connected: Bool
-    
-    var body: some View {
-        HStack {
-            Image(systemName: channelIcon(name))
-                .foregroundStyle(statusColor)
-            Text(name)
-                .font(.system(size: 14, weight: .medium))
-            Spacer()
-            Circle()
-                .fill(statusColor)
-                .frame(width: 10, height: 10)
-            Text(statusText)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
-    }
-    
-    private var statusColor: Color {
-        if !enabled { return .gray }
-        return connected ? .green : .orange
-    }
-    
-    private var statusText: String {
-        if !enabled { return "Disabled" }
-        return connected ? "Connected" : "Connecting"
-    }
-    
-    private func channelIcon(_ name: String) -> String {
-        switch name.lowercased() {
-        case "web": return "globe"
-        case "telegram": return "paperplane.fill"
-        case "whatsapp": return "message.fill"
-        default: return "antenna.radiowaves.left.and.right"
-        }
-    }
-}
-
 // MARK: - Setup View (During Launch)
 
 struct SetupView: View {
@@ -453,7 +400,7 @@ struct SetupView: View {
                             HStack {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
-                                Text("✅ \(launcher.completedStepsCount) steps completed")
+                                Text("\(launcher.completedStepsCount) steps completed")
                                     .font(.system(size: 13))
                                     .foregroundStyle(.secondary)
                             }
@@ -666,6 +613,7 @@ class OpenClawLauncher: ObservableObject {
     @Published var gatewayStatusData: GatewayStatus?
     @Published var menuBarStatus: MenuBarStatus = .stopped
     @Published var containerStartTime: Date?
+    @Published var uptimeTick: UInt = 0  // Incremented every second to drive uptime display
     
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
@@ -685,6 +633,11 @@ class OpenClawLauncher: ObservableObject {
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
 
+    deinit {
+        healthCheckTimer?.invalidate()
+        uptimeTimer?.invalidate()
+    }
+    
     // MARK: - Computed Properties for UI
     
     var currentStep: LaunchStep? {
@@ -699,12 +652,16 @@ class OpenClawLauncher: ObservableObject {
         steps.filter { $0.status == .error }
     }
     
+    /// Total logical launch steps: Docker check, first-run setup, auth, image pull, container start, gateway wait.
+    /// Update if the launch pipeline adds or removes steps.
+    private let totalLaunchSteps: Double = 8.0
+    
     var progress: Double {
-        let total = 8.0 // Approximate total steps
-        return min(Double(completedStepsCount) / total, 1.0)
+        return min(Double(completedStepsCount) / totalLaunchSteps, 1.0)
     }
     
     var uptimeString: String {
+        _ = uptimeTick  // Subscribe to tick updates
         guard let start = containerStartTime else { return "00:00:00" }
         let elapsed = Int(Date().timeIntervalSince(start))
         let hours = elapsed / 3600
@@ -755,9 +712,13 @@ class OpenClawLauncher: ObservableObject {
     
     func restartContainer() async {
         addStep(.running, "Restarting...")
+        menuBarStatus = .starting
+        gatewayHealthy = false
         _ = try? await shell("docker", "restart", containerName)
         addStep(.done, "Restarted")
         containerStartTime = Date()
+        menuBarStatus = .running
+        startHealthCheck()
     }
 
     func submitApiKey() {
@@ -930,17 +891,23 @@ class OpenClawLauncher: ObservableObject {
     private func startHealthCheck() {
         stopHealthCheck()
         
-        // Start uptime timer
-        uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.objectWillChange.send()
+        // Start uptime timer on main run loop
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.uptimeTick += 1
+                }
             }
         }
         
-        // Start health check timer
-        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task {
-                await self?.checkGatewayHealth()
+        // Start health check timer on main run loop
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+                Task {
+                    await self?.checkGatewayHealth()
+                }
             }
         }
         
@@ -977,8 +944,12 @@ class OpenClawLauncher: ObservableObject {
         } catch {
             // Fallback to simple health check
             let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
+            let healthy = check?.exitCode == 0
             await MainActor.run {
-                gatewayHealthy = check?.exitCode == 0
+                gatewayHealthy = healthy
+                if !healthy {
+                    gatewayStatusData = nil
+                }
             }
         }
     }
