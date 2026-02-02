@@ -1,5 +1,7 @@
 # OpenClaw Launcher 🐙
 
+> **Beta** — UI and features are actively evolving.
+
 **Double-click → Docker runs in lockdown → browser opens → done.**
 
 No Terminal. No Node.js. No PATH issues. No CLI.
@@ -15,15 +17,22 @@ User double-clicks OpenClawLauncher.app
          │
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│  Native SwiftUI Window (no Terminal)                     │
-│  ☑ Checking Docker...          ✅                        │
-│  ☑ First-time setup...         ✅                        │
-│  ☑ Pulling Docker image...     ✅  (checks for updates)   │
-│  ☑ Starting container...       ✅  (lockdown mode)       │
-│  ☑ Waiting for Gateway...      ✅                        │
+│  Native SwiftUI Window                                   │
 │                                                          │
-│  Token: a8f3b2c1...    [Copy]                            │
-│  [ Open Control UI ]   [ Stop ]                          │
+│  ┌─ Setup ──────────────────────────────────────────┐    │
+│  │  [████████░░░░░░░░] 50%                          │    │
+│  │  ⏳ Pulling Docker image...                      │    │
+│  │  ✅ 4 steps completed                            │    │
+│  └──────────────────────────────────────────────────┘    │
+│                                                          │
+│  ┌─ Dashboard (after launch) ───────────────────────┐    │
+│  │  🟢 Container Status: Running    00:05:23        │    │
+│  │  💡 Chat with your agent in the Control UI.      │    │
+│  │  [ Open Control UI ]                             │    │
+│  │  [ View Logs ] [ Restart ] [ Stop ]              │    │
+│  └──────────────────────────────────────────────────┘    │
+│                                                          │
+│  🐙● Menu bar icon (green/yellow/red status)             │
 └──────────────────────────────────────────────────────────┘
          │
          ▼  (browser opens automatically)
@@ -51,27 +60,36 @@ User double-clicks OpenClawLauncher.app
 └──────────────────────────────────────────────────────────┘
 ```
 
+## Features
+
+- **Progress bar** during setup with current step and completion count
+- **Dashboard** after launch with container status, health indicator, uptime timer
+- **Menu bar icon** with green/yellow/red status dot and quick actions
+- **Health checks** polling the gateway every 5 seconds
+- **Docker auto-install** if Docker Desktop is not found
+- **OAuth + API key auth** on first run, or skip and configure later in browser
+
 ## Install & Run
 
 ### macOS App (recommended)
 
-1. **Install [Docker Desktop](https://docker.com/products/docker-desktop)** (one-time)
+1. **Install [Docker Desktop](https://docker.com/products/docker-desktop)** (one-time, or the app will install it for you)
 2. **Download `OpenClawLauncher.dmg`** from the [latest release](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
 3. Open the DMG, drag **OpenClawLauncher.app** to `/Applications`
 4. Double-click **OpenClawLauncher.app**
 5. Browser opens → paste token → sign in with your AI provider → start chatting
 
-Everything persists across restarts in `~/.openclaw-docker/`.
+Everything persists across restarts in `~/.openclaw-launcher/`.
 
 ### Shell script (for devs)
 
 ```bash
 # Prerequisites: Docker Desktop running
-./openclaw.sh           # Start
-./openclaw.sh stop      # Stop
-./openclaw.sh logs      # Follow logs
-./openclaw.sh status    # Check if running
-./openclaw.sh reset     # Nuke and start fresh
+./run.sh           # Start
+./run.sh stop      # Stop
+./run.sh logs      # Follow logs
+./run.sh status    # Check if running
+./run.sh reset     # Nuke and start fresh
 ```
 
 ---
@@ -87,6 +105,9 @@ cd app/macos && bash build.sh
 # Output:
 #   dist/OpenClawLauncher.app    ← drag to /Applications
 #   dist/OpenClawLauncher.dmg    ← share with others
+
+# Run tests
+cd app/macos && swift test
 ```
 
 Or let CI build it — push to `main` and download the `.dmg` artifact from GitHub Actions.
@@ -95,13 +116,22 @@ Or let CI build it — push to `main` and download the `.dmg` artifact from GitH
 
 ```
 openclaw-launcher/
-├── openclaw.sh               # Shell launcher (for devs)
+├── run.sh                    # Shell launcher (for devs)
 ├── app/macos/
 │   ├── Package.swift         # Swift package manifest
-│   ├── Sources/main.swift    # Native SwiftUI app
+│   ├── Sources/
+│   │   ├── OpenClawApp/
+│   │   │   └── main.swift    # App entry point + MenuBarExtra
+│   │   └── OpenClawLib/
+│   │       ├── Models.swift           # Data types, enums, errors
+│   │       ├── LauncherViews.swift    # SwiftUI views (dashboard, setup, cards)
+│   │       ├── OpenClawLauncher.swift # Core logic (Docker, health, timers)
+│   │       └── AnthropicOAuth.swift   # OAuth PKCE flow
+│   ├── Tests/OpenClawTests/  # Unit tests
 │   ├── build.sh              # Compiles Swift → .app → .dmg
 │   └── scripts/              # Build helpers (icon generation)
-└── .github/workflows/        # CI (macOS app build)
+├── docs/plan/                # Planning docs
+└── .github/workflows/        # CI (build + test)
 ```
 
 ## Security: Lockdown Mode
@@ -143,8 +173,8 @@ Nothing to edit in files or Terminal. All in the browser.
 
 | Problem                  | Fix                                      |
 |--------------------------|------------------------------------------|
-| "Docker not found"       | Install Docker Desktop                   |
+| "Docker not found"       | Install Docker Desktop (or let the app do it) |
 | App shows spinner        | Docker Desktop might be starting (~30s)  |
 | Can't connect to UI      | `docker ps` — ensure port 18789 is free  |
-| Lost gateway token       | `cat ~/.openclaw-docker/.env`            |
-| Want to start fresh      | Delete `~/.openclaw-docker/` folder      |
+| Lost gateway token       | `cat ~/.openclaw-launcher/.env`          |
+| Want to start fresh      | Delete `~/.openclaw-launcher/` folder    |
