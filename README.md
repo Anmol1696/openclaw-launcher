@@ -1,5 +1,11 @@
 # OpenClaw Launcher 🐙
 
+[![Build macOS App](https://github.com/Anmol1696/openclaw-launcher/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Anmol1696/openclaw-launcher/actions/workflows/build-macos.yml)
+[![Release](https://img.shields.io/github/v/release/Anmol1696/openclaw-launcher?label=release)](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+[![License](https://img.shields.io/github/license/Anmol1696/openclaw-launcher)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+[![Swift](https://img.shields.io/badge/Swift-5.9-orange?logo=swift)](https://swift.org)
+
 > **Beta** — UI and features are actively evolving.
 
 **Double-click → Docker runs in lockdown → browser opens → done.**
@@ -7,6 +13,20 @@
 No Terminal. No Node.js. No PATH issues. No CLI.
 
 Native SwiftUI app handles everything silently in the background.
+
+---
+
+## Quick Start
+
+1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+2. **Open** the DMG and drag **OpenClawLauncher.app** to `/Applications`
+3. **Double-click** OpenClawLauncher.app
+4. The app will install Docker Desktop for you if needed, pull the OpenClaw image, and launch the container
+5. Your browser opens automatically — paste the gateway token, sign in with your AI provider, and start chatting
+
+That's it. Everything persists across restarts in `~/.openclaw-launcher/`.
+
+> **First launch?** The app handles Docker Desktop installation, image pulling, token generation, and auth setup. Just follow the on-screen progress bar.
 
 ---
 
@@ -70,16 +90,6 @@ User double-clicks OpenClawLauncher.app
 - **OAuth + API key auth** on first run, or skip and configure later in browser
 
 ## Install & Run
-
-### macOS App (recommended)
-
-1. **Install [Docker Desktop](https://docker.com/products/docker-desktop)** (one-time, or the app will install it for you)
-2. **Download `OpenClawLauncher.dmg`** from the [latest release](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
-3. Open the DMG, drag **OpenClawLauncher.app** to `/Applications`
-4. Double-click **OpenClawLauncher.app**
-5. Browser opens → paste token → sign in with your AI provider → start chatting
-
-Everything persists across restarts in `~/.openclaw-launcher/`.
 
 ### Shell script (for devs)
 
