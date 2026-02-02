@@ -14,6 +14,11 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var menuBarStatus: MenuBarStatus = .stopped
     @Published public var containerStartTime: Date?
     @Published public var uptimeTick: UInt = 0
+    @Published public var pullProgressText: String?
+    @Published public var containerLogs: String = ""
+    @Published public var showLogSheet: Bool = false
+    @Published public var showResetConfirm: Bool = false
+    @Published public var authExpiredBanner: String?
 
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
@@ -82,8 +87,14 @@ public class OpenClawLauncher: ObservableObject {
 
         Task {
             do {
+                // Quick check: is the container already running from a previous session?
+                if await tryRecoverRunningContainer() { return }
+
                 try await checkDocker()
                 try await firstRunSetup()
+
+                // Check for expired OAuth tokens and attempt refresh
+                await refreshOAuthIfNeeded()
 
                 // Pause for auth on first run
                 if isFirstRun && !authProfileExists() && !oauthCredentialsExist() {
@@ -98,6 +109,36 @@ public class OpenClawLauncher: ObservableObject {
                 menuBarStatus = .stopped
             }
         }
+    }
+
+    /// Detect a running container from a previous app session and resume monitoring it.
+    private func tryRecoverRunningContainer() async -> Bool {
+        // Check if docker is even available (quick test, don't install)
+        guard let info = try? await shell("docker", "info"),
+              info.exitCode == 0 else { return false }
+
+        // Check if our container is running
+        guard let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}"),
+              !ps.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        // Container is running — load config and resume
+        migrateOldStateDir()
+        if FileManager.default.fileExists(atPath: envFile.path) {
+            if let content = try? String(contentsOf: envFile, encoding: .utf8) {
+                for line in content.split(separator: "\n") {
+                    if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
+                        gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+                    }
+                }
+            }
+        }
+
+        addStep(.done, "Recovered running container")
+        state = .running
+        menuBarStatus = .running
+        containerStartTime = Date() // approximate — we don't know exact start
+        startHealthCheck()
+        return true
     }
 
     public func stopContainer() {
@@ -305,6 +346,72 @@ public class OpenClawLauncher: ObservableObject {
         }
     }
 
+    // MARK: - Reset & Cleanup
+
+    public func resetEverything() {
+        Task {
+            addStep(.running, "Stopping container...")
+            _ = try? await shell("docker", "stop", containerName)
+            _ = try? await shell("docker", "rm", "-f", containerName)
+            addStep(.done, "Container removed")
+
+            // Remove all local state
+            try? FileManager.default.removeItem(at: stateDir)
+            addStep(.done, "Local config cleaned up")
+
+            steps = []
+            gatewayToken = nil
+            uptimeTick = 0
+            containerStartTime = nil
+            gatewayHealthy = false
+            gatewayStatusData = nil
+            isFirstRun = false
+            hasStarted = false
+            state = .idle
+            menuBarStatus = .stopped
+            authExpiredBanner = nil
+            stopHealthCheck()
+        }
+    }
+
+    // MARK: - Log Viewer
+
+    public func fetchLogs() {
+        Task {
+            let result = try? await shell("docker", "logs", "--tail", "300", containerName)
+            let stdout = result?.stdout ?? ""
+            let stderr = result?.stderr ?? ""
+            containerLogs = stdout.isEmpty ? stderr : stdout + (stderr.isEmpty ? "" : "\n--- stderr ---\n" + stderr)
+            showLogSheet = true
+        }
+    }
+
+    // MARK: - OAuth Token Refresh
+
+    private func refreshOAuthIfNeeded() async {
+        let oauthFile = configDir.appendingPathComponent("credentials/oauth.json")
+        guard FileManager.default.fileExists(atPath: oauthFile.path),
+              let data = try? Data(contentsOf: oauthFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let anthropic = json["anthropic"] as? [String: Any],
+              let expires = anthropic["expires"] as? Int64,
+              let refreshToken = anthropic["refresh"] as? String else { return }
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard nowMs >= expires else { return } // not expired
+
+        // Attempt refresh
+        do {
+            let creds = try await AnthropicOAuth.refreshAccessToken(refreshToken: refreshToken)
+            try saveOAuthCredentials(creds)
+            addStep(.done, "OAuth token refreshed")
+            authExpiredBanner = nil
+        } catch {
+            authExpiredBanner = "Auth expired — re-authenticate in Control UI"
+            addStep(.warning, "OAuth token expired (refresh failed)")
+        }
+    }
+
     // MARK: - Token Generation
 
     public func generateSecureToken() -> String {
@@ -499,10 +606,29 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Checking for image updates...")
+        addStep(.running, "Pulling image...")
+        pullProgressText = "Connecting..."
 
-        let pull = try await shell("docker", "pull", imageName)
-        if pull.exitCode == 0 {
+        let exitCode = try await shellStreaming("docker", "pull", imageName) { [weak self] line in
+            guard let self = self else { return }
+            // Parse docker pull progress lines, e.g. "abc123: Downloading  52.3MB/100MB"
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                Task { @MainActor in
+                    // Show last meaningful line as progress
+                    if trimmed.contains("Pulling") || trimmed.contains("Downloading")
+                        || trimmed.contains("Extracting") || trimmed.contains("Verifying")
+                        || trimmed.contains("Pull complete") || trimmed.contains("Already exists")
+                        || trimmed.contains("Digest") || trimmed.contains("Status") {
+                        self.pullProgressText = String(trimmed.prefix(80))
+                    }
+                }
+            }
+        }
+
+        pullProgressText = nil
+
+        if exitCode == 0 {
             addStep(.done, "Docker image up to date")
             return
         }
@@ -514,7 +640,7 @@ public class OpenClawLauncher: ObservableObject {
             return
         }
 
-        throw LauncherError.pullFailed(pull.stderr)
+        throw LauncherError.pullFailed("Image pull failed")
     }
 
     private func runContainer() async throws {
@@ -703,5 +829,54 @@ public class OpenClawLauncher: ObservableObject {
             stdout: String(data: outData, encoding: .utf8) ?? "",
             stderr: String(data: errData, encoding: .utf8) ?? ""
         )
+    }
+
+    /// Run a command and call `onLine` for each line of combined stdout+stderr output.
+    private func shellStreaming(_ args: String..., onLine: @escaping (String) -> Void) async throws -> Int {
+        let process = Process()
+        let pipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = pipe
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/Applications/Docker.app/Contents/Resources/bin",
+        ]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+        process.environment = env
+
+        try process.run()
+
+        // Read line by line in background
+        await Task.detached {
+            let handle = pipe.fileHandleForReading
+            var buffer = Data()
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                buffer.append(chunk)
+                // Split on newlines
+                while let range = buffer.range(of: Data("\n".utf8)) {
+                    let lineData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
+                    buffer.removeSubrange(buffer.startIndex..<range.upperBound)
+                    if let line = String(data: lineData, encoding: .utf8) {
+                        onLine(line)
+                    }
+                }
+            }
+            // Remaining data
+            if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
+                onLine(line)
+            }
+        }.value
+
+        process.waitUntilExit()
+        return Int(process.terminationStatus)
     }
 }

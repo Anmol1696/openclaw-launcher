@@ -32,7 +32,7 @@ public struct MenuBarContent: View {
         Divider()
 
         Button("View Logs") {
-            launcher.viewLogs()
+            launcher.fetchLogs()
         }
 
         Button("Show Window") {
@@ -40,6 +40,12 @@ public struct MenuBarContent: View {
             let window = NSApp.windows.first { $0.contentView != nil && $0.title != "" }
                 ?? NSApp.windows.first
             window?.makeKeyAndOrderFront(nil)
+        }
+
+        Divider()
+
+        Button("Reset & Clean Up...") {
+            launcher.showResetConfirm = true
         }
 
         Divider()
@@ -88,6 +94,22 @@ public struct LauncherView: View {
                 }
             }
 
+            // Auth expired banner
+            if let banner = launcher.authExpiredBanner {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(banner)
+                        .font(.system(size: 12))
+                    Spacer()
+                    Button("Dismiss") { launcher.authExpiredBanner = nil }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11))
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1))
+            }
+
             // Content area
             if launcher.state == .running {
                 DashboardView(launcher: launcher)
@@ -96,6 +118,15 @@ public struct LauncherView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $launcher.showLogSheet) {
+            LogViewerSheet(launcher: launcher)
+        }
+        .alert("Reset & Clean Up", isPresented: $launcher.showResetConfirm) {
+            Button("Reset", role: .destructive) { launcher.resetEverything() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will stop the container, remove it, and delete all local config (~/.openclaw-launcher). You'll need to set up again.")
+        }
     }
 }
 
@@ -157,7 +188,7 @@ public struct DashboardView: View {
                     .controlSize(.large)
 
                     HStack(spacing: 12) {
-                        Button(action: { launcher.viewLogs() }) {
+                        Button(action: { launcher.fetchLogs() }) {
                             HStack {
                                 Image(systemName: "doc.text")
                                 Text("View Logs")
@@ -266,6 +297,14 @@ struct SetupView: View {
                                     Text(current.message)
                                         .font(.system(size: 14, weight: .medium))
                                 }
+                            }
+
+                            if let pullProgress = launcher.pullProgressText {
+                                Text(pullProgress)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                             }
 
                             ProgressView(value: launcher.progress)
@@ -420,6 +459,57 @@ struct OAuthCodeInputView: View {
                     .buttonStyle(.bordered).controlSize(.large)
             }
         }
+    }
+}
+
+// MARK: - Log Viewer Sheet
+
+struct LogViewerSheet: View {
+    @ObservedObject var launcher: OpenClawLauncher
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Container Logs")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("Refresh") { launcher.fetchLogs() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(launcher.containerLogs, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button("Open in Terminal") { launcher.viewLogs() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView {
+                Text(launcher.containerLogs.isEmpty ? "No logs available." : launcher.containerLogs)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Close") { launcher.showLogSheet = false }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 600, height: 400)
     }
 }
 
