@@ -62,6 +62,114 @@ check_docker() {
 }
 
 # ============================================================================
+#  OAuth: Sign in with Claude (PKCE flow)
+# ============================================================================
+OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_AUTHORIZE_URL="https://claude.ai/oauth/authorize"
+OAUTH_TOKEN_URL="https://console.anthropic.com/v1/oauth/token"
+OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
+OAUTH_SCOPES="org:create_api_key user:profile user:inference"
+
+base64url_encode() {
+    openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+oauth_sign_in() {
+    log "Starting OAuth sign-in..."
+
+    # Generate PKCE verifier + challenge
+    local verifier challenge
+    verifier=$(openssl rand 32 | base64url_encode)
+    challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | base64url_encode)
+
+    # Build authorize URL
+    local auth_url="${OAUTH_AUTHORIZE_URL}?code=true"
+    auth_url+="&client_id=${OAUTH_CLIENT_ID}"
+    auth_url+="&response_type=code"
+    auth_url+="&redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_REDIRECT_URI}'))")"
+    auth_url+="&scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_SCOPES}'))")"
+    auth_url+="&code_challenge=${challenge}"
+    auth_url+="&code_challenge_method=S256"
+    auth_url+="&state=${verifier}"
+
+    # Open browser
+    log "Opening browser for sign-in..."
+    if [ "$(uname)" = "Darwin" ]; then
+        open "$auth_url"
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "$auth_url"
+    else
+        echo "   Open this URL in your browser:"
+        echo "   $auth_url"
+    fi
+
+    echo ""
+    echo "   After signing in, you'll see a page with an authorization code."
+    echo "   Copy the code (or the full URL) and paste it below."
+    echo ""
+    read -rp "   Authorization code: " raw_code
+
+    # Extract code from URL if user pasted a full URL
+    local code="$raw_code"
+    if [[ "$raw_code" == http* ]]; then
+        code=$(python3 -c "from urllib.parse import urlparse, parse_qs; print(parse_qs(urlparse('${raw_code}').query).get('code',[''])[0])")
+    fi
+
+    if [ -z "$code" ]; then
+        warn "No code provided — skipping OAuth."
+        return
+    fi
+
+    # Exchange code for tokens
+    log "Exchanging authorization code..."
+    local response
+    response=$(curl -s -X POST "$OAUTH_TOKEN_URL" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"grant_type\": \"authorization_code\",
+            \"client_id\": \"${OAUTH_CLIENT_ID}\",
+            \"code\": \"${code}\",
+            \"state\": \"${verifier}\",
+            \"redirect_uri\": \"${OAUTH_REDIRECT_URI}\",
+            \"code_verifier\": \"${verifier}\"
+        }")
+
+    # Parse response
+    local access_token refresh_token expires_in
+    access_token=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+    refresh_token=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('refresh_token',''))" 2>/dev/null)
+    expires_in=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('expires_in',0))" 2>/dev/null)
+
+    if [ -z "$access_token" ] || [ -z "$refresh_token" ]; then
+        warn "OAuth exchange failed. Server response:"
+        echo "   $response"
+        return
+    fi
+
+    # Calculate expires_at (ms) — now + expires_in - 5 min buffer
+    local now_ms expires_at_ms
+    now_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+    expires_at_ms=$(python3 -c "print(${now_ms} + int(${expires_in})*1000 - 5*60*1000)")
+
+    # Write credentials
+    mkdir -p "$CONFIG_DIR/credentials"
+    chmod 700 "$CONFIG_DIR/credentials"
+    cat > "$CONFIG_DIR/credentials/oauth.json" <<OAUTHEOF
+{
+  "anthropic": {
+    "type": "oauth",
+    "refresh": "$refresh_token",
+    "access": "$access_token",
+    "expires": $expires_at_ms
+  }
+}
+OAUTHEOF
+    chmod 600 "$CONFIG_DIR/credentials/oauth.json"
+
+    ok "Signed in with Claude"
+}
+
+# ============================================================================
 #  Step 2: First-run setup (generate token, create config)
 # ============================================================================
 first_run_setup() {
@@ -86,30 +194,79 @@ OPENCLAW_GATEWAY_TOKEN=$token
 OPENCLAW_PORT=$PORT
 EOF
 
-    # Write minimal config that lets Gateway start headless
-    # The Control UI handles everything else (API keys, channels, etc.)
+    # Write config with actual token value (not env var reference)
     cat > "$CONFIG_DIR/openclaw.json" <<CONF
 {
   "gateway": {
     "mode": "local",
     "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "$token"
+    },
     "controlUi": {
       "enabled": true,
       "allowInsecureAuth": true,
       "basePath": "/openclaw",
       "dangerouslyDisableDeviceAuth": true
     }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/node/.openclaw/workspace",
+      "model": { "primary": "anthropic/claude-opus-4-5" }
+    }
   }
 }
 CONF
+
+    # Create agent directories
+    mkdir -p "$CONFIG_DIR/agents/default/agent" "$CONFIG_DIR/agents/default/sessions"
 
     ok "Config created at $STATE_DIR"
     echo ""
     echo -e "   ${CYAN}Gateway token:${NC} $token"
     echo -e "   ${CYAN}Config dir:${NC}    $CONFIG_DIR"
-    echo -e "   ${CYAN}Workspace:${NC}     $WORKSPACE_DIR"
     echo ""
-    echo "   You'll set up your API key in the browser after launch."
+
+    # Auth setup menu
+    echo -e "   ${CYAN}Authentication${NC}"
+    echo "   Choose how to connect to Anthropic:"
+    echo ""
+    echo "   1) Sign in with Claude (OAuth — recommended for Pro/Max)"
+    echo "   2) Use API Key"
+    echo "   3) Skip (set up later in browser)"
+    echo ""
+    read -rp "   Choice [1/2/3]: " auth_choice
+
+    case "${auth_choice}" in
+        1)
+            oauth_sign_in
+            ;;
+        2)
+            read -rp "   Anthropic API key (sk-ant-...): " api_key
+            if [ -n "$api_key" ]; then
+                cat > "$CONFIG_DIR/agents/default/agent/auth-profiles.json" <<AUTHEOF
+{
+  "version": 1,
+  "profiles": {
+    "anthropic:default": {
+      "type": "api_key",
+      "provider": "anthropic",
+      "key": "$api_key"
+    }
+  }
+}
+AUTHEOF
+                ok "API key saved"
+            else
+                warn "Empty key — skipped."
+            fi
+            ;;
+        *)
+            warn "Skipped — set up authentication in the Control UI settings."
+            ;;
+    esac
     echo ""
 }
 
@@ -168,7 +325,7 @@ run_container() {
     # Wait for Gateway to be ready
     log "Waiting for Gateway..."
     for i in $(seq 1 30); do
-        if curl -sf "http://localhost:${OPENCLAW_PORT}/" > /dev/null 2>&1; then
+        if curl -sf "http://localhost:${OPENCLAW_PORT}/openclaw/" > /dev/null 2>&1; then
             echo ""
             ok "OpenClaw is running!"
             open_browser
@@ -188,7 +345,7 @@ run_container() {
 # ============================================================================
 open_browser() {
     source "$ENV_FILE"
-    local url="http://localhost:${OPENCLAW_PORT}/openclaw?token=${OPENCLAW_GATEWAY_TOKEN}&onboarding=1"
+    local url="http://localhost:${OPENCLAW_PORT}/openclaw?token=${OPENCLAW_GATEWAY_TOKEN}"
 
     echo ""
     echo -e "   ${CYAN}Control UI:${NC}  $url"
@@ -259,4 +416,3 @@ case "${1:-}" in
         main
         ;;
 esac
-

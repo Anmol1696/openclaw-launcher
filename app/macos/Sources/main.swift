@@ -10,6 +10,100 @@
 
 import SwiftUI
 import Foundation
+import CryptoKit
+
+// MARK: - Anthropic OAuth (PKCE)
+
+private extension Data {
+    func base64URLEncodedString() -> String {
+        self.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+enum AnthropicOAuth {
+    static let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static let authorizeURL = URL(string: "https://claude.ai/oauth/authorize")!
+    private static let tokenURL = URL(string: "https://console.anthropic.com/v1/oauth/token")!
+    private static let redirectURI = "https://console.anthropic.com/oauth/code/callback"
+    private static let scopes = "org:create_api_key user:profile user:inference"
+
+    struct PKCE {
+        let verifier: String
+        let challenge: String
+    }
+
+    static func generatePKCE() throws -> PKCE {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+        let verifier = Data(bytes).base64URLEncodedString()
+        let hash = SHA256.hash(data: Data(verifier.utf8))
+        let challenge = Data(hash).base64URLEncodedString()
+        return PKCE(verifier: verifier, challenge: challenge)
+    }
+
+    static func buildAuthorizeURL(pkce: PKCE) -> URL {
+        var components = URLComponents(url: authorizeURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "code", value: "true"),
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "scope", value: scopes),
+            URLQueryItem(name: "code_challenge", value: pkce.challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: pkce.verifier),
+        ]
+        return components.url!
+    }
+
+    static func exchangeCode(code: String, verifier: String) async throws -> OAuthCredentials {
+        let payload: [String: Any] = [
+            "grant_type": "authorization_code",
+            "client_id": clientId,
+            "code": code,
+            "state": verifier,
+            "redirect_uri": redirectURI,
+            "code_verifier": verifier,
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? "<error>"
+            throw NSError(domain: "AnthropicOAuth", code: (response as? HTTPURLResponse)?.statusCode ?? 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Token exchange failed: \(text)"])
+        }
+
+        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let access = decoded?["access_token"] as? String,
+              let refresh = decoded?["refresh_token"] as? String,
+              let expiresIn = decoded?["expires_in"] as? Double else {
+            throw NSError(domain: "AnthropicOAuth", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Unexpected token response"])
+        }
+
+        let expiresAtMs = Int64(Date().timeIntervalSince1970 * 1000) + Int64(expiresIn * 1000) - Int64(5 * 60 * 1000)
+        return OAuthCredentials(type: "oauth", refresh: refresh, access: access, expires: expiresAtMs)
+    }
+}
+
+struct OAuthCredentials {
+    let type: String
+    let refresh: String
+    let access: String
+    let expires: Int64
+}
 
 // MARK: - App Entry Point
 
@@ -97,6 +191,73 @@ struct LauncherView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.large)
                     }
+                } else if launcher.state == .needsAuth {
+                    VStack(spacing: 12) {
+                        Text("Authentication")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Choose how to connect to Anthropic.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 8) {
+                            Button("Sign in with Claude") {
+                                launcher.startOAuth()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+
+                            Button("Use API Key") {
+                                launcher.showApiKeyInput()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+
+                            Button("Skip") {
+                                launcher.skipAuth()
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12))
+                        }
+                    }
+                } else if launcher.state == .waitingForOAuthCode {
+                    VStack(spacing: 12) {
+                        if launcher.showApiKeyField {
+                            Text("API Key Setup")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Enter your Anthropic API key.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            SecureField("sk-ant-...", text: $launcher.apiKeyInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(maxWidth: 360)
+                            HStack(spacing: 12) {
+                                Button("Continue") { launcher.submitApiKey() }
+                                    .buttonStyle(.borderedProminent).controlSize(.large)
+                                Button("Back") { launcher.state = .needsAuth }
+                                    .buttonStyle(.bordered).controlSize(.large)
+                            }
+                        } else {
+                            Text("Paste Authorization Code")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Sign in on the browser page that opened,\nthen copy the code and paste it below.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            TextField("Paste code or URL here...", text: $launcher.oauthCodeInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(maxWidth: 360)
+                            HStack(spacing: 12) {
+                                Button("Exchange") { launcher.exchangeOAuthCode() }
+                                    .buttonStyle(.borderedProminent).controlSize(.large)
+                                    .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                Button("Back") { launcher.state = .needsAuth }
+                                    .buttonStyle(.bordered).controlSize(.large)
+                            }
+                        }
+                    }
                 } else if launcher.state == .stopped {
                     Button("Start OpenClaw") {
                         launcher.start()
@@ -168,7 +329,7 @@ struct StepRow: View {
 
 enum StepStatus { case pending, running, done, error, warning }
 
-enum LauncherState { case idle, working, running, stopped, error }
+enum LauncherState { case idle, working, needsAuth, waitingForOAuthCode, running, stopped, error }
 
 struct LaunchStep: Identifiable {
     let id = UUID()
@@ -183,6 +344,11 @@ class OpenClawLauncher: ObservableObject {
     @Published var steps: [LaunchStep] = []
     @Published var state: LauncherState = .idle
     @Published var gatewayToken: String?
+    @Published var apiKeyInput: String = ""
+    @Published var oauthCodeInput: String = ""
+    @Published var showApiKeyField: Bool = false
+    private var isFirstRun = false
+    private var currentPKCE: AnthropicOAuth.PKCE?
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
@@ -209,12 +375,14 @@ class OpenClawLauncher: ObservableObject {
             do {
                 try await checkDocker()
                 try await firstRunSetup()
-                try await ensureImage()
-                try await runContainer()
-                try await waitForGateway()
 
-                state = .running
-                openBrowser()
+                // Pause for auth on first run
+                if isFirstRun && !authProfileExists() && !oauthCredentialsExist() {
+                    state = .needsAuth
+                    return
+                }
+
+                try await continueAfterSetup()
             } catch {
                 addStep(.error, error.localizedDescription)
                 state = .error
@@ -231,10 +399,141 @@ class OpenClawLauncher: ObservableObject {
         }
     }
 
+    func submitApiKey() {
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty {
+            let authDir = configDir.appendingPathComponent("agents/default/agent")
+            let authFile = authDir.appendingPathComponent("auth-profiles.json")
+            let json = """
+            {
+              "version": 1,
+              "profiles": {
+                "anthropic:default": {
+                  "type": "api_key",
+                  "provider": "anthropic",
+                  "key": "\(key)"
+                }
+              }
+            }
+            """
+            try? json.write(to: authFile, atomically: true, encoding: .utf8)
+            addStep(.done, "API key saved")
+        } else {
+            addStep(.warning, "Skipped API key — set up later in Control UI")
+        }
+
+        state = .working
+        Task {
+            do {
+                try await continueAfterSetup()
+            } catch {
+                addStep(.error, error.localizedDescription)
+                state = .error
+            }
+        }
+    }
+
+    func startOAuth() {
+        do {
+            let pkce = try AnthropicOAuth.generatePKCE()
+            currentPKCE = pkce
+            let url = AnthropicOAuth.buildAuthorizeURL(pkce: pkce)
+            NSWorkspace.shared.open(url)
+            showApiKeyField = false
+            oauthCodeInput = ""
+            state = .waitingForOAuthCode
+            addStep(.running, "Opened browser for Anthropic sign-in")
+        } catch {
+            addStep(.error, "Failed to start OAuth: \(error.localizedDescription)")
+        }
+    }
+
+    func showApiKeyInput() {
+        showApiKeyField = true
+        apiKeyInput = ""
+        state = .waitingForOAuthCode
+    }
+
+    func skipAuth() {
+        addStep(.warning, "Skipped auth — set up later in Control UI")
+        state = .working
+        Task {
+            do { try await continueAfterSetup() }
+            catch { addStep(.error, error.localizedDescription); state = .error }
+        }
+    }
+
+    func exchangeOAuthCode() {
+        guard let pkce = currentPKCE else {
+            addStep(.error, "No PKCE session. Try signing in again.")
+            state = .needsAuth
+            return
+        }
+
+        // Extract code from input — user may paste full URL or just the code
+        var code = oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let urlComponents = URLComponents(string: code),
+           let codeParam = urlComponents.queryItems?.first(where: { $0.name == "code" })?.value {
+            code = codeParam
+        }
+
+        addStep(.running, "Exchanging authorization code...")
+        state = .working
+
+        Task {
+            do {
+                let creds = try await AnthropicOAuth.exchangeCode(code: code, verifier: pkce.verifier)
+                try saveOAuthCredentials(creds)
+                addStep(.done, "Signed in with Claude")
+                try await continueAfterSetup()
+            } catch {
+                addStep(.error, "OAuth exchange failed: \(error.localizedDescription)")
+                state = .needsAuth
+            }
+        }
+    }
+
+    private func saveOAuthCredentials(_ creds: OAuthCredentials) throws {
+        let credDir = configDir.appendingPathComponent("credentials")
+        try FileManager.default.createDirectory(at: credDir, withIntermediateDirectories: true,
+                                                  attributes: [.posixPermissions: 0o700])
+        let oauthFile = credDir.appendingPathComponent("oauth.json")
+        let json: [String: Any] = [
+            "anthropic": [
+                "type": creds.type,
+                "refresh": creds.refresh,
+                "access": creds.access,
+                "expires": creds.expires,
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: oauthFile, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: oauthFile.path)
+    }
+
+    private func oauthCredentialsExist() -> Bool {
+        let oauthFile = configDir.appendingPathComponent("credentials/oauth.json")
+        return FileManager.default.fileExists(atPath: oauthFile.path)
+    }
+
+    private func continueAfterSetup() async throws {
+        try await ensureImage()
+        try await runContainer()
+        try await waitForGateway()
+
+        state = .running
+        openBrowser()
+    }
+
+    private func authProfileExists() -> Bool {
+        let authFile = configDir.appendingPathComponent("agents/default/agent/auth-profiles.json")
+        return FileManager.default.fileExists(atPath: authFile.path)
+    }
+
     func openBrowser() {
         var urlString = "http://localhost:\(port)/openclaw"
         if let token = gatewayToken {
-            urlString += "?token=\(token)&onboarding=1"
+            urlString += "?token=\(token)"
         }
         let url = URL(string: urlString)!
         NSWorkspace.shared.open(url)
@@ -294,6 +593,7 @@ class OpenClawLauncher: ObservableObject {
             return
         }
 
+        isFirstRun = true
         addStep(.running, "First-time setup...")
 
         // Create directories
@@ -308,33 +608,39 @@ class OpenClawLauncher: ObservableObject {
         let env = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
         try env.write(to: envFile, atomically: true, encoding: .utf8)
 
-        // Write minimal config
+        // Write config with actual token value
         let config = """
 {
   "gateway": {
     "mode": "local",
     "bind": "lan",
-    "auth": { "mode": "token" },
+    "auth": {
+      "mode": "token",
+      "token": "\(token)"
+    },
     "controlUi": {
       "enabled": true,
       "allowInsecureAuth": true,
-      "basePath": "/openclaw"
-    },
-    "http": {
-      "endpoints": {
-        "chatCompletions": { "enabled": true }
-      }
+      "basePath": "/openclaw",
+      "dangerouslyDisableDeviceAuth": true
     }
   },
   "agents": {
     "defaults": {
-      "workspace": "/home/node/.openclaw/workspace"
+      "workspace": "/home/node/.openclaw/workspace",
+      "model": { "primary": "anthropic/claude-opus-4-5" }
     }
   }
 }
 """
         let configFile = configDir.appendingPathComponent("openclaw.json")
         try config.write(to: configFile, atomically: true, encoding: .utf8)
+
+        // Create agent directories
+        let agentDir = configDir.appendingPathComponent("agents/default/agent")
+        let sessionsDir = configDir.appendingPathComponent("agents/default/sessions")
+        try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
 
         addStep(.done, "Configuration created")
     }
@@ -434,7 +740,7 @@ class OpenClawLauncher: ObservableObject {
 
         for _ in 0..<30 {
             try await Task.sleep(nanoseconds: 1_000_000_000)
-            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/")
+            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
             if check?.exitCode == 0 {
                 addStep(.done, "Gateway is ready!")
                 return
