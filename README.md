@@ -18,7 +18,7 @@ User double-clicks OpenClaw.app
 │  Native SwiftUI Window (no Terminal)                     │
 │  ☑ Checking Docker...          ✅                        │
 │  ☑ First-time setup...         ✅                        │
-│  ☑ Building Docker image...    ✅  (first launch only)   │
+│  ☑ Pulling Docker image...     ✅  (checks for updates)   │
 │  ☑ Starting container...       ✅  (lockdown mode)       │
 │  ☑ Waiting for Gateway...      ✅                        │
 │                                                          │
@@ -51,43 +51,58 @@ User double-clicks OpenClaw.app
 └──────────────────────────────────────────────────────────┘
 ```
 
-## User Journey
+## Install & Run
 
-1. **Install Docker Desktop** (one-time prerequisite)
-2. **Double-click OpenClaw.app**
-3. Small native window shows progress (no Terminal)
-4. Browser opens → paste token → sign in with your AI provider
-5. Start chatting
+### macOS App (recommended)
 
-That's it. Everything persists across restarts in `~/.openclaw-docker/`.
+1. **Install [Docker Desktop](https://docker.com/products/docker-desktop)** (one-time)
+2. **Download `OpenClaw.dmg`** from the [latest release](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+3. Open the DMG, drag **OpenClaw.app** to `/Applications`
+4. Double-click **OpenClaw.app**
+5. Browser opens → paste token → sign in with your AI provider → start chatting
+
+Everything persists across restarts in `~/.openclaw-docker/`.
+
+### Shell script (for devs)
+
+```bash
+# Prerequisites: Docker Desktop running
+./openclaw.sh           # Start
+./openclaw.sh stop      # Stop
+./openclaw.sh logs      # Follow logs
+./openclaw.sh status    # Check if running
+./openclaw.sh reset     # Nuke and start fresh
+```
 
 ---
 
-## Files
+## Build from Source
 
-```
-openclaw-launcher/
-├── Sources/main.swift    # Native SwiftUI macOS app (no Terminal)
-├── Package.swift         # Swift package manifest
-├── Dockerfile            # Hardened multi-stage Docker image
-├── openclaw.sh           # Shell script alternative (for devs)
-├── build-app.sh          # Compiles Swift → .app → .dmg
-└── README.md
-```
-
-## Build
+Requires Xcode (full install, not just Command Line Tools) for SwiftUI.
 
 ```bash
-# Prerequisites: Xcode command line tools
-xcode-select --install
-
-# Build the .app + .dmg
-chmod +x build-app.sh
-./build-app.sh
+# Build .app + .dmg
+cd app/macos && bash build.sh
 
 # Output:
 #   dist/OpenClaw.app    ← drag to /Applications
 #   dist/OpenClaw.dmg    ← share with others
+```
+
+Or let CI build it — push to `main` and download the `.dmg` artifact from GitHub Actions.
+
+## Project Structure
+
+```
+openclaw-launcher/
+├── Dockerfile                # Hardened Docker image (pushed to ghcr.io)
+├── openclaw.sh               # Shell launcher (for devs)
+├── app/macos/
+│   ├── Package.swift         # Swift package manifest
+│   ├── Sources/main.swift    # Native SwiftUI app
+│   ├── build.sh              # Compiles Swift → .app → .dmg
+│   └── scripts/              # Build helpers (icon generation)
+└── .github/workflows/        # CI (Docker publish + macOS build)
 ```
 
 ## Security: Lockdown Mode
@@ -124,16 +139,6 @@ It needs credentials for that. The Control UI (in browser) handles this:
 - **API key**: Paste an Anthropic/OpenAI key in the settings panel
 
 Nothing to edit in files or Terminal. All in the browser.
-
-## Shell Script Alternative (for devs)
-
-```bash
-./openclaw.sh           # Start
-./openclaw.sh stop      # Stop
-./openclaw.sh logs      # Follow logs
-./openclaw.sh status    # Check if running
-./openclaw.sh reset     # Nuke and start fresh
-```
 
 ## Troubleshooting
 

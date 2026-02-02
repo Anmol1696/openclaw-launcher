@@ -45,6 +45,15 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BINARY" "$CONTENTS/MacOS/${APP_NAME}"
 
+# Generate app icon from emoji
+echo "   Generating app icon..."
+ICONSET_DIR="$DIST_DIR/AppIcon.iconset"
+mkdir -p "$ICONSET_DIR"
+swift "$SCRIPT_DIR/scripts/generate-icon.swift" "$ICONSET_DIR"
+iconutil -c icns "$ICONSET_DIR" -o "$CONTENTS/Resources/AppIcon.icns"
+rm -rf "$ICONSET_DIR"
+echo "   ✅ App icon generated"
+
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -67,6 +76,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

@@ -6,6 +6,10 @@
 # --- Stage 1: Install OpenClaw ---
 FROM node:22-slim AS builder
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g openclaw@latest 2>&1 \
     && npm cache clean --force
 
