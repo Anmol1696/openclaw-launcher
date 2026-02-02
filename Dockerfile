@@ -7,8 +7,12 @@
 FROM node:22-slim AS builder
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Force git to use HTTPS instead of SSH (some deps reference ssh:// URLs)
+RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
+    && git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 RUN npm install -g openclaw@latest 2>&1 \
     && npm cache clean --force
