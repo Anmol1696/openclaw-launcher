@@ -290,11 +290,6 @@ struct SetupView: View {
                             StepRow(step: step)
                         }
                     }
-
-                    // Show errors prominently
-                    ForEach(launcher.errorSteps) { step in
-                        StepRow(step: step)
-                    }
                 }
                 .padding(20)
             }

@@ -106,6 +106,7 @@ public class OpenClawLauncher: ObservableObject {
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
             steps = []
+            uptimeTick = 0
             state = .stopped
             menuBarStatus = .stopped
             stopHealthCheck()
@@ -116,11 +117,26 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Restarting...")
         menuBarStatus = .starting
         gatewayHealthy = false
-        _ = try? await shell("docker", "restart", containerName)
-        addStep(.done, "Restarted")
-        containerStartTime = Date()
-        menuBarStatus = .running
-        startHealthCheck()
+        uptimeTick = 0
+        do {
+            let result = try await shell("docker", "restart", containerName)
+            if result.exitCode != 0 {
+                addStep(.error, "Failed to restart: \(result.stderr.prefix(200))")
+                state = .error
+                menuBarStatus = .stopped
+                stopHealthCheck()
+                return
+            }
+            addStep(.done, "Restarted")
+            containerStartTime = Date()
+            menuBarStatus = .running
+            startHealthCheck()
+        } catch {
+            addStep(.error, "Failed to restart: \(error.localizedDescription)")
+            state = .error
+            menuBarStatus = .stopped
+            stopHealthCheck()
+        }
     }
 
     public func submitApiKey() {
@@ -593,23 +609,17 @@ public class OpenClawLauncher: ObservableObject {
     private func startHealthCheck() {
         stopHealthCheck()
 
-        DispatchQueue.main.async { [weak self] in
+        uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                Task { @MainActor in
-                    self.uptimeTick += 1
-                }
+            Task { @MainActor in
+                self.uptimeTick += 1
             }
         }
 
-        DispatchQueue.main.async { [weak self] in
+        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                Task {
-                    await self.checkGatewayHealth()
-                }
+            Task {
+                await self.checkGatewayHealth()
             }
         }
 
