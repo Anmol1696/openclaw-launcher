@@ -54,28 +54,44 @@ Our multi-stage build copies only `/app/dist`, `/app/node_modules`, `/app/ui`,
 
 ## Building locally
 
-All flavors are build targets in a single `docker/Dockerfile`:
+All flavors are build targets in a single `docker/Dockerfile`. Use the Makefile:
 
 ```bash
-# Build base
-docker build --target base -f docker/Dockerfile -t openclaw-launcher:base .
+cd docker
 
-# Build lite
-docker build --target lite -f docker/Dockerfile -t openclaw-launcher:lite .
+make help              # Show all targets
 
-# Build full
-docker build --target full -f docker/Dockerfile -t openclaw-launcher:full .
+make build             # Build base (default)
+make build FLAVOR=lite # Build lite
+make build-all         # Build all flavors
+
+make verify            # Verify base tools
+make verify-all        # Verify all flavors
+
+make shell             # Shell into base
+make shell FLAVOR=full # Shell into full
+
+make run               # Run base (gateway on localhost:18789)
+make run FLAVOR=lite   # Run lite
+
+make clean             # Remove all local images
 ```
 
-## Verify
+### Multi-arch
 
 ```bash
-docker run --rm openclaw-launcher:base jq --version
-docker run --rm openclaw-launcher:base rg --version
-docker run --rm openclaw-launcher:base fd --version
-docker run --rm openclaw-launcher:base sqlite3 --version
-docker run --rm openclaw-launcher:lite python3 -c "import pandas; print(pandas.__version__)"
-docker run --rm openclaw-launcher:full ffmpeg -version
+make build-multiarch          # Validate multi-arch build (no load)
+make build-multiarch-all      # Validate all flavors
+make push FLAVOR=base         # Build + push to GHCR (requires login)
+make push-all                 # Push all flavors
+```
+
+### Raw docker commands
+
+```bash
+docker build --target base -f docker/Dockerfile -t openclaw-launcher:base .
+docker build --target lite -f docker/Dockerfile -t openclaw-launcher:lite .
+docker build --target full -f docker/Dockerfile -t openclaw-launcher:full .
 ```
 
 ## Using a flavor

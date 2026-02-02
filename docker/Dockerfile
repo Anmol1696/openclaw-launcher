@@ -81,7 +81,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-USER node
+# Install playwright CLI (upstream only has playwright-core, not the full package)
+# --with-deps installs system libraries (libgbm, libnss3, etc.) so must run as root
+RUN npm install -g playwright \
+    && playwright install --with-deps chromium
 
-# Playwright + Chromium (installed as node user, deps installed as root above)
-RUN npx playwright install --with-deps chromium
+USER node
