@@ -455,6 +455,29 @@ public class OpenClawLauncher: ObservableObject {
         }
     }
 
+    // MARK: - Re-authenticate
+
+    public func reAuthenticate() {
+        Task {
+            // Stop container if running
+            if state == .running {
+                _ = try? await shell("docker", "stop", containerName)
+                stopHealthCheck()
+            }
+
+            // Delete auth files
+            let authFile = configDir.appendingPathComponent("agents/default/agent/auth-profiles.json")
+            let oauthFile = configDir.appendingPathComponent("credentials/oauth.json")
+            try? FileManager.default.removeItem(at: authFile)
+            try? FileManager.default.removeItem(at: oauthFile)
+
+            steps = []
+            gatewayHealthy = false
+            menuBarStatus = .stopped
+            state = .needsAuth
+        }
+    }
+
     // MARK: - Log Viewer
 
     public func fetchLogs() {

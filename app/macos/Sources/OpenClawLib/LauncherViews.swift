@@ -42,6 +42,10 @@ public struct MenuBarContent: View {
             window?.makeKeyAndOrderFront(nil)
         }
 
+        Button("Sign In Again...") {
+            launcher.reAuthenticate()
+        }
+
         Divider()
 
         Button("Reset & Clean Up...") {
@@ -319,6 +323,8 @@ struct SetupView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    } else if launcher.state == .needsAuth || launcher.state == .waitingForOAuthCode {
+                        // Auth screen — no step list, auth controls are in the bottom area
                     } else {
                         ForEach(launcher.steps) { step in
                             StepRow(step: step)
