@@ -595,8 +595,9 @@ public class OpenClawLauncher: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
                 Task { @MainActor in
-                    self?.uptimeTick += 1
+                    self.uptimeTick += 1
                 }
             }
         }
@@ -604,8 +605,9 @@ public class OpenClawLauncher: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
                 Task {
-                    await self?.checkGatewayHealth()
+                    await self.checkGatewayHealth()
                 }
             }
         }
