@@ -134,7 +134,7 @@ public struct DashboardView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "lightbulb.fill")
                         .foregroundStyle(.yellow)
-                    Text("Configure channels, agents, and settings in the Control UI.")
+                    Text("Chat with your agent and manage settings in the Control UI.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }

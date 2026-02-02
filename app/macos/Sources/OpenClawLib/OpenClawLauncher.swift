@@ -105,6 +105,7 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.running, "Stopping OpenClaw...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
+            steps = []
             state = .stopped
             menuBarStatus = .stopped
             stopHealthCheck()
