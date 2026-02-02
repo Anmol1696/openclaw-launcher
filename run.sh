@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-#  OpenClaw Launcher — double-click to run
+#  OpenClaw Launcher — shell-based runner for developers
 #  Runs OpenClaw Gateway in an isolated Docker container.
 #  Control UI opens in your browser at http://localhost:18789
 # ============================================================================
@@ -366,11 +366,22 @@ run_container() {
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
         --init \
-        -p "${OPENCLAW_PORT}:18789" \
+        --read-only \
+        --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+        --tmpfs /home/node/.npm:rw,size=64m \
+        --memory 2g \
+        --memory-swap 2g \
+        --cpus 2.0 \
+        --pids-limit 256 \
+        --cap-drop ALL \
+        --cap-add NET_BIND_SERVICE \
+        --security-opt no-new-privileges:true \
+        -p "127.0.0.1:${OPENCLAW_PORT}:18789" \
         -v "${CONFIG_DIR}:/home/node/.openclaw" \
         -v "${WORKSPACE_DIR}:/home/node/.openclaw/workspace" \
         -e "HOME=/home/node" \
         -e "TERM=xterm-256color" \
+        -e "NODE_ENV=production" \
         --env-file "$ENV_FILE" \
         "$IMAGE_NAME" \
         node dist/index.js gateway --bind lan --port 18789 \

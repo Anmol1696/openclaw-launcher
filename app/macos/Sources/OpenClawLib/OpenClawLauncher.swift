@@ -9,8 +9,16 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var apiKeyInput: String = ""
     @Published public var oauthCodeInput: String = ""
     @Published public var showApiKeyField: Bool = false
+    @Published public var gatewayHealthy: Bool = false
+    @Published public var gatewayStatusData: GatewayStatus?
+    @Published public var menuBarStatus: MenuBarStatus = .stopped
+    @Published public var containerStartTime: Date?
+    @Published public var uptimeTick: UInt = 0
+
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
+    private var healthCheckTimer: Timer?
+    private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
@@ -27,6 +35,42 @@ public class OpenClawLauncher: ObservableObject {
 
     public init() {}
 
+    deinit {
+        healthCheckTimer?.invalidate()
+        uptimeTimer?.invalidate()
+    }
+
+    // MARK: - Computed Properties for UI
+
+    public var currentStep: LaunchStep? {
+        steps.last(where: { $0.status == .running })
+    }
+
+    public var completedStepsCount: Int {
+        steps.filter { $0.status == .done }.count
+    }
+
+    public var errorSteps: [LaunchStep] {
+        steps.filter { $0.status == .error }
+    }
+
+    /// Total logical launch steps: Docker check, first-run setup, auth, image pull, container start, gateway wait.
+    private let totalLaunchSteps: Double = 8.0
+
+    public var progress: Double {
+        return min(Double(completedStepsCount) / totalLaunchSteps, 1.0)
+    }
+
+    public var uptimeString: String {
+        _ = uptimeTick
+        guard let start = containerStartTime else { return "00:00:00" }
+        let elapsed = Int(Date().timeIntervalSince(start))
+        let hours = elapsed / 3600
+        let minutes = (elapsed % 3600) / 60
+        let seconds = elapsed % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
     // MARK: - Public
 
     public func start() {
@@ -34,6 +78,7 @@ public class OpenClawLauncher: ObservableObject {
         hasStarted = true
         steps = []
         state = .working
+        menuBarStatus = .starting
 
         Task {
             do {
@@ -50,16 +95,47 @@ public class OpenClawLauncher: ObservableObject {
             } catch {
                 addStep(.error, error.localizedDescription)
                 state = .error
+                menuBarStatus = .stopped
             }
         }
     }
 
     public func stopContainer() {
         Task {
-            addStep(.running, "Stopping OpenClawLauncher...")
+            addStep(.running, "Stopping OpenClaw...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
+            steps = []
+            uptimeTick = 0
             state = .stopped
+            menuBarStatus = .stopped
+            stopHealthCheck()
+        }
+    }
+
+    public func restartContainer() async {
+        addStep(.running, "Restarting...")
+        menuBarStatus = .starting
+        gatewayHealthy = false
+        uptimeTick = 0
+        do {
+            let result = try await shell("docker", "restart", containerName)
+            if result.exitCode != 0 {
+                addStep(.error, "Failed to restart: \(result.stderr.prefix(200))")
+                state = .error
+                menuBarStatus = .stopped
+                stopHealthCheck()
+                return
+            }
+            addStep(.done, "Restarted")
+            containerStartTime = Date()
+            menuBarStatus = .running
+            startHealthCheck()
+        } catch {
+            addStep(.error, "Failed to restart: \(error.localizedDescription)")
+            state = .error
+            menuBarStatus = .stopped
+            stopHealthCheck()
         }
     }
 
@@ -194,6 +270,9 @@ public class OpenClawLauncher: ObservableObject {
         try await waitForGateway()
 
         state = .running
+        menuBarStatus = .running
+        containerStartTime = Date()
+        startHealthCheck()
         openBrowser()
     }
 
@@ -523,6 +602,66 @@ public class OpenClawLauncher: ObservableObject {
 
         // Not fatal — might just be slow
         addStep(.warning, "Gateway is still starting. Try opening the browser anyway.")
+    }
+
+    // MARK: - Health Check
+
+    private func startHealthCheck() {
+        stopHealthCheck()
+
+        uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.uptimeTick += 1
+            }
+        }
+
+        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            Task {
+                await self.checkGatewayHealth()
+            }
+        }
+
+        Task {
+            await checkGatewayHealth()
+        }
+    }
+
+    private func stopHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+        uptimeTimer?.invalidate()
+        uptimeTimer = nil
+    }
+
+    private func checkGatewayHealth() async {
+        do {
+            let url = URL(string: "http://localhost:\(port)/openclaw/api/status")!
+            let (data, response) = try await URLSession.shared.data(from: url)
+
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                await MainActor.run {
+                    gatewayHealthy = false
+                }
+                return
+            }
+
+            let status = try JSONDecoder().decode(GatewayStatus.self, from: data)
+            await MainActor.run {
+                gatewayHealthy = true
+                gatewayStatusData = status
+            }
+        } catch {
+            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
+            let healthy = check?.exitCode == 0
+            await MainActor.run {
+                gatewayHealthy = healthy
+                if !healthy {
+                    gatewayStatusData = nil
+                }
+            }
+        }
     }
 
     // MARK: - Shell Helper

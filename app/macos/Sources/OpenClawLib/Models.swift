@@ -4,6 +4,12 @@ public enum StepStatus { case pending, running, done, error, warning }
 
 public enum LauncherState { case idle, working, needsAuth, waitingForOAuthCode, running, stopped, error }
 
+public enum MenuBarStatus { case starting, running, stopped }
+
+public struct GatewayStatus: Codable {
+    public let uptime: Int?
+}
+
 public struct LaunchStep: Identifiable {
     public let id = UUID()
     public let status: StepStatus
