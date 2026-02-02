@@ -2,17 +2,35 @@ import XCTest
 @testable import OpenClawLib
 
 /// Integration tests exercising OpenClawLauncher with MockShellExecutor.
-/// All tests use suppressSideEffects=true so no browser/Docker.app opens,
-/// no timers fire, and no real network calls happen.
+/// All tests use a temporary directory for state (never touches ~/.openclaw-launcher),
+/// suppressSideEffects=true so no browser/Docker.app opens, no timers fire,
+/// and no real network calls happen.
 @MainActor
 final class LauncherIntegrationTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Create a test launcher with mock shell, fast retries, and no side effects.
+    private var tempStateDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempStateDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openclaw-test-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        if let dir = tempStateDir {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        tempStateDir = nil
+        super.tearDown()
+    }
+
+    /// Create a test launcher with mock shell, temp state dir, fast retries, and no side effects.
     private func makeLauncher(mock: MockShellExecutor) -> OpenClawLauncher {
         let launcher = OpenClawLauncher(
             shell: mock,
+            stateDir: tempStateDir,
             dockerRetryCount: 2,         // 2 retries instead of 45
             dockerRetryDelayNs: 1_000,   // ~instant instead of 2s
             gatewayRetryCount: 2,
@@ -22,20 +40,17 @@ final class LauncherIntegrationTests: XCTestCase {
         return launcher
     }
 
-    /// Pre-seed ~/.openclaw-launcher so firstRunSetup loads existing config
-    /// instead of creating new dirs/files. Returns the state dir.
+    /// Pre-seed the temp state dir so firstRunSetup loads existing config.
     @discardableResult
     private func seedStateDir() throws -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let stateDir = home.appendingPathComponent(".openclaw-launcher")
-        let configDir = stateDir.appendingPathComponent("config")
+        let configDir = tempStateDir.appendingPathComponent("config")
         let agentDir = configDir.appendingPathComponent("agents/default/agent")
         let sessionsDir = configDir.appendingPathComponent("agents/default/sessions")
 
         try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
 
-        let envFile = stateDir.appendingPathComponent(".env")
+        let envFile = tempStateDir.appendingPathComponent(".env")
         try "OPENCLAW_GATEWAY_TOKEN=testtoken123\nOPENCLAW_PORT=18789\n"
             .write(to: envFile, atomically: true, encoding: .utf8)
 
@@ -46,13 +61,7 @@ final class LauncherIntegrationTests: XCTestCase {
         let authFile = agentDir.appendingPathComponent("auth-profiles.json")
         try "{\"version\":1}".write(to: authFile, atomically: true, encoding: .utf8)
 
-        return stateDir
-    }
-
-    private func cleanupStateDir() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let stateDir = home.appendingPathComponent(".openclaw-launcher")
-        try? FileManager.default.removeItem(at: stateDir)
+        return tempStateDir
     }
 
     /// Wait for launcher state to settle (not .working).
@@ -70,11 +79,9 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testDockerNotRunning_ThrowsError() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
-        // docker info always fails
         mock.on({ $0.contains("info") }, return: MockShellExecutor.fail(stderr: "Cannot connect"))
         mock.defaultResult = MockShellExecutor.fail
 
@@ -96,7 +103,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testPullFails_NoCachedImage() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
@@ -119,7 +125,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testPullFails_FallsBackToCachedImage() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
@@ -148,7 +153,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testRunContainerFails() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
@@ -173,7 +177,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testContainerAlreadyRunning_SkipsPullAndRun() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
@@ -196,7 +199,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testRecoverRunningContainer() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on({ $0.contains("info") }, return: MockShellExecutor.ok)
@@ -220,7 +222,6 @@ final class LauncherIntegrationTests: XCTestCase {
 
     func testGatewayTimeout_NonFatal() async throws {
         try seedStateDir()
-        defer { cleanupStateDir() }
 
         let mock = MockShellExecutor()
         mock.on("which", return: MockShellExecutor.ok(stdout: "/usr/local/bin/docker\n"))
@@ -269,7 +270,6 @@ final class LauncherIntegrationTests: XCTestCase {
         mock.defaultResult = MockShellExecutor.ok
 
         let launcher = makeLauncher(mock: mock)
-        launcher.suppressSideEffects = true
         launcher.state = .running
 
         launcher.stopContainer()
