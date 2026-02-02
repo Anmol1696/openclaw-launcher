@@ -14,7 +14,7 @@ app/macos/              # Native SwiftUI macOS app
   Package.swift         # Swift package (macOS 14+, Swift 5.9)
   Sources/
     OpenClawApp/
-      main.swift        # @main entry point, WindowGroup, MenuBarExtra
+      OpenClawApp.swift  # @main entry point, WindowGroup, MenuBarExtra
     OpenClawLib/
       Models.swift           # StepStatus, LauncherState, MenuBarStatus, GatewayStatus, LaunchStep, ShellResult, LauncherError
       LauncherViews.swift    # LauncherView, DashboardView, SetupView, StatusCard, MenuBarContent, StepRow, auth views

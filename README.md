@@ -121,7 +121,7 @@ openclaw-launcher/
 │   ├── Package.swift         # Swift package manifest
 │   ├── Sources/
 │   │   ├── OpenClawApp/
-│   │   │   └── main.swift    # App entry point + MenuBarExtra
+│   │   │   └── OpenClawApp.swift  # App entry point + MenuBarExtra
 │   │   └── OpenClawLib/
 │   │       ├── Models.swift           # Data types, enums, errors
 │   │       ├── LauncherViews.swift    # SwiftUI views (dashboard, setup, cards)
