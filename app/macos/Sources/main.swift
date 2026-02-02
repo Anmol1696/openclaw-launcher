@@ -185,7 +185,7 @@ class OpenClawLauncher: ObservableObject {
     @Published var gatewayToken: String?
 
     private let containerName = "openclaw"
-    private let imageName = "ghcr.io/anmol1696/openclaw:latest"
+    private let imageName = "ghcr.io/openclaw/openclaw:latest"
     private let port: Int = 18789
     private var hasStarted = false
 
@@ -411,7 +411,10 @@ class OpenClawLauncher: ObservableObject {
             "--restart", "unless-stopped",
 
             // --- Image ---
-            imageName
+            imageName,
+
+            // --- CMD override (upstream default is just `node dist/index.js`) ---
+            "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"
         )
 
         if result.exitCode != 0 {

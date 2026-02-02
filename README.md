@@ -95,14 +95,13 @@ Or let CI build it — push to `main` and download the `.dmg` artifact from GitH
 
 ```
 openclaw-launcher/
-├── Dockerfile                # Hardened Docker image (pushed to ghcr.io)
 ├── openclaw.sh               # Shell launcher (for devs)
 ├── app/macos/
 │   ├── Package.swift         # Swift package manifest
 │   ├── Sources/main.swift    # Native SwiftUI app
 │   ├── build.sh              # Compiles Swift → .app → .dmg
 │   └── scripts/              # Build helpers (icon generation)
-└── .github/workflows/        # CI (Docker publish + macOS build)
+└── .github/workflows/        # CI (macOS app build)
 ```
 
 ## Security: Lockdown Mode

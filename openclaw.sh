@@ -9,7 +9,7 @@ set -euo pipefail
 
 # --- Config ---
 CONTAINER_NAME="openclaw"
-IMAGE_NAME="ghcr.io/anmol1696/openclaw:latest"
+IMAGE_NAME="ghcr.io/openclaw/openclaw:latest"
 STATE_DIR="$HOME/.openclaw-docker"
 CONFIG_DIR="$STATE_DIR/config"
 WORKSPACE_DIR="$STATE_DIR/workspace"
@@ -173,7 +173,7 @@ run_container() {
         -e "TERM=xterm-256color" \
         -e "OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}" \
         "$IMAGE_NAME" \
-        node dist/index.mjs gateway --bind lan --port 18789 \
+        node dist/index.js gateway --bind lan --port 18789 \
         > /dev/null
 
     # Wait for Gateway to be ready
