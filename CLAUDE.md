@@ -23,7 +23,7 @@ dist/                   # Build output (.app, .dmg)
 ```bash
 # Build the macOS .app and .dmg
 cd app/macos && bash build.sh
-# Output: dist/OpenClaw.app, dist/OpenClaw.dmg (at repo root)
+# Output: dist/OpenClawLauncher.app, dist/OpenClawLauncher.dmg (at repo root)
 
 # Swift build only (no .app bundle)
 cd app/macos && swift build -c release

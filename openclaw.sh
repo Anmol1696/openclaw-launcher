@@ -30,14 +30,61 @@ warn() { echo -e "${YELLOW}⚠️${NC}  $*"; }
 fail() { echo -e "${RED}❌${NC} $*"; exit 1; }
 
 # ============================================================================
-#  Step 1: Check Docker
+#  Step 1a: Install Docker Desktop (macOS only)
+# ============================================================================
+install_docker() {
+    log "Docker Desktop not found. Downloading..."
+
+    local arch
+    arch=$(uname -m)
+    local dmg_url
+    if [ "$arch" = "arm64" ]; then
+        dmg_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+    else
+        dmg_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+    fi
+
+    local dmg_path="/tmp/Docker.dmg"
+    rm -f "$dmg_path"
+
+    log "Downloading Docker Desktop ($arch)... This may take a few minutes."
+    curl -L -o "$dmg_path" "$dmg_url" || fail "Download failed."
+
+    ok "Download complete."
+    log "Installing Docker Desktop..."
+
+    hdiutil attach -nobrowse -quiet "$dmg_path" || fail "Failed to mount DMG."
+
+    if [ ! -d "/Volumes/Docker/Docker.app" ]; then
+        hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
+        fail "Docker.app not found in mounted DMG."
+    fi
+
+    if cp -R "/Volumes/Docker/Docker.app" "/Applications/Docker.app" 2>/dev/null; then
+        ok "Docker Desktop installed."
+    else
+        warn "Requesting administrator permission to install..."
+        sudo cp -R "/Volumes/Docker/Docker.app" "/Applications/Docker.app" || {
+            hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
+            fail "Installation failed."
+        }
+        ok "Docker Desktop installed."
+    fi
+
+    hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
+    rm -f "$dmg_path"
+}
+
+# ============================================================================
+#  Step 1b: Check Docker
 # ============================================================================
 check_docker() {
-    if ! command -v docker &>/dev/null; then
-        fail "Docker not found. Install Docker Desktop first."
-        echo "   https://docker.com/products/docker-desktop"
-        [ "$(uname)" = "Darwin" ] && open "https://docker.com/products/docker-desktop"
-        exit 1
+    if ! command -v docker &>/dev/null && [ ! -d "/Applications/Docker.app" ]; then
+        if [ "$(uname)" = "Darwin" ]; then
+            install_docker
+        else
+            fail "Docker not found. Install Docker first: https://docs.docker.com/engine/install/"
+        fi
     fi
 
     if ! docker info &>/dev/null 2>&1; then
@@ -278,7 +325,7 @@ pull_image() {
         return 0
     fi
 
-    log "Pulling OpenClaw Docker image..."
+    log "Pulling OpenClawLauncher Docker image..."
     docker pull "$IMAGE_NAME" 2>&1 | tee "$LOG_FILE"
     ok "Image pulled."
 }
@@ -296,7 +343,7 @@ run_container() {
         state=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "none")
 
         if [ "$state" = "running" ]; then
-            ok "OpenClaw is already running."
+            ok "OpenClawLauncher is already running."
             open_browser
             return 0
         fi
@@ -306,7 +353,7 @@ run_container() {
         docker rm "$CONTAINER_NAME" &>/dev/null || true
     fi
 
-    log "Starting OpenClaw..."
+    log "Starting OpenClawLauncher..."
 
     docker run -d \
         --name "$CONTAINER_NAME" \
@@ -327,7 +374,7 @@ run_container() {
     for i in $(seq 1 30); do
         if curl -sf "http://localhost:${OPENCLAW_PORT}/openclaw/" > /dev/null 2>&1; then
             echo ""
-            ok "OpenClaw is running!"
+            ok "OpenClawLauncher is running!"
             open_browser
             return 0
         fi
@@ -367,7 +414,7 @@ open_browser() {
 main() {
     echo ""
     echo "  ╔═══════════════════════════════════════╗"
-    echo "  ║         🐙  OpenClaw Launcher         ║"
+    echo "  ║       🐙  OpenClawLauncher           ║"
     echo "  ╠═══════════════════════════════════════╣"
     echo "  ║  Isolated Docker · Browser Control UI ║"
     echo "  ╚═══════════════════════════════════════╝"

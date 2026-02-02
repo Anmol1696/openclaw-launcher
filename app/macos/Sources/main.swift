@@ -133,7 +133,7 @@ struct LauncherView: View {
             VStack(spacing: 8) {
                 Text("🐙")
                     .font(.system(size: 48))
-                Text("OpenClaw")
+                Text("OpenClawLauncher")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                 Text("Isolated AI Agent • Docker Powered")
                     .font(.system(size: 13))
@@ -259,7 +259,7 @@ struct LauncherView: View {
                         }
                     }
                 } else if launcher.state == .stopped {
-                    Button("Start OpenClaw") {
+                    Button("Start OpenClawLauncher") {
                         launcher.start()
                     }
                     .buttonStyle(.borderedProminent)
@@ -392,7 +392,7 @@ class OpenClawLauncher: ObservableObject {
 
     func stopContainer() {
         Task {
-            addStep(.running, "Stopping OpenClaw...")
+            addStep(.running, "Stopping OpenClawLauncher...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
             state = .stopped
@@ -559,6 +559,18 @@ class OpenClawLauncher: ObservableObject {
     private func checkDocker() async throws {
         addStep(.running, "Checking Docker...")
 
+        // Check if docker CLI exists at all
+        let which = try? await shell("which", "docker")
+        let dockerCliExists = which?.exitCode == 0
+
+        // Check if Docker.app is installed
+        let dockerAppExists = FileManager.default.fileExists(atPath: "/Applications/Docker.app")
+
+        // If neither exists, download and install Docker Desktop
+        if !dockerCliExists && !dockerAppExists {
+            try await installDocker()
+        }
+
         let result = try? await shell("docker", "info")
         if result == nil || result!.exitCode != 0 {
             // Try to start Docker Desktop
@@ -578,6 +590,71 @@ class OpenClawLauncher: ObservableObject {
         }
 
         addStep(.done, "Docker is ready")
+    }
+
+    private func installDocker() async throws {
+        addStep(.running, "Docker Desktop not found. Downloading...")
+
+        // Detect architecture
+        let arch = try await shell("uname", "-m")
+        let archString = arch.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dmgURL: URL
+        if archString == "arm64" {
+            dmgURL = URL(string: "https://desktop.docker.com/mac/main/arm64/Docker.dmg")!
+        } else {
+            dmgURL = URL(string: "https://desktop.docker.com/mac/main/amd64/Docker.dmg")!
+        }
+
+        // Download DMG to temp directory
+        let tempDir = FileManager.default.temporaryDirectory
+        let dmgPath = tempDir.appendingPathComponent("Docker.dmg")
+
+        // Clean up any previous download
+        try? FileManager.default.removeItem(at: dmgPath)
+
+        addStep(.running, "Downloading Docker Desktop (\(archString))... This may take a few minutes.")
+
+        let (downloadedURL, _) = try await URLSession.shared.download(from: dmgURL)
+        try FileManager.default.moveItem(at: downloadedURL, to: dmgPath)
+
+        addStep(.done, "Download complete")
+        addStep(.running, "Installing Docker Desktop...")
+
+        // Mount DMG
+        let mount = try await shell("hdiutil", "attach", "-nobrowse", "-quiet", dmgPath.path)
+        if mount.exitCode != 0 {
+            throw LauncherError.dockerInstallFailed("Failed to mount DMG: \(mount.stderr.prefix(200))")
+        }
+
+        // Find the mounted volume
+        let volumePath = "/Volumes/Docker"
+        let sourceApp = "\(volumePath)/Docker.app"
+
+        guard FileManager.default.fileExists(atPath: sourceApp) else {
+            _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
+            throw LauncherError.dockerInstallFailed("Docker.app not found in mounted DMG")
+        }
+
+        // Copy to /Applications — try direct copy first
+        let copy = try await shell("/bin/cp", "-R", sourceApp, "/Applications/Docker.app")
+        if copy.exitCode != 0 {
+            // Need admin privileges — use osascript to prompt
+            addStep(.warning, "Requesting administrator permission to install...")
+            let adminCopy = try await shell(
+                "osascript", "-e",
+                "do shell script \"cp -R '\(sourceApp)' '/Applications/Docker.app'\" with administrator privileges"
+            )
+            if adminCopy.exitCode != 0 {
+                _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
+                throw LauncherError.dockerInstallFailed("Installation cancelled or failed: \(adminCopy.stderr.prefix(200))")
+            }
+        }
+
+        // Detach DMG and clean up
+        _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
+        try? FileManager.default.removeItem(at: dmgPath)
+
+        addStep(.done, "Docker Desktop installed")
     }
 
     private func firstRunSetup() async throws {
@@ -772,7 +849,16 @@ class OpenClawLauncher: ObservableObject {
         process.arguments = args
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        process.environment = ProcessInfo.processInfo.environment
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/Applications/Docker.app/Contents/Resources/bin",
+        ]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+        process.environment = env
 
         try process.run()
 
@@ -802,6 +888,7 @@ struct ShellResult {
 
 enum LauncherError: LocalizedError {
     case dockerNotRunning
+    case dockerInstallFailed(String)
     case pullFailed(String)
     case runFailed(String)
     case noToken
@@ -810,6 +897,8 @@ enum LauncherError: LocalizedError {
         switch self {
         case .dockerNotRunning:
             return "Docker Desktop is not running. Please start it and try again."
+        case .dockerInstallFailed(let msg):
+            return "Failed to install Docker Desktop: \(msg)"
         case .pullFailed(let msg):
             return "Failed to pull Docker image: \(msg.prefix(200))"
         case .runFailed(let msg):

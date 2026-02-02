@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="OpenClaw"
+APP_NAME="OpenClawLauncher"
 BUILD_DIR="$SCRIPT_DIR/.build"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
@@ -61,9 +61,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>OpenClaw</string>
+    <string>OpenClawLauncher</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenClaw</string>
+    <string>OpenClawLauncher</string>
     <key>CFBundleIdentifier</key>
     <string>ai.openclaw.launcher</string>
     <key>CFBundleVersion</key>
@@ -71,7 +71,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleExecutable</key>
-    <string>OpenClaw</string>
+    <string>OpenClawLauncher</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -98,7 +98,7 @@ echo "   ✅ Signed"
 # ──────────────────────────────────────────────
 if command -v hdiutil &>/dev/null; then
     echo "   Creating DMG..."
-    DMG_PATH="$DIST_DIR/OpenClaw.dmg"
+    DMG_PATH="$DIST_DIR/OpenClawLauncher.dmg"
     rm -f "$DMG_PATH"
 
     DMG_STAGING="$DIST_DIR/dmg-staging"
@@ -107,7 +107,7 @@ if command -v hdiutil &>/dev/null; then
     cp -r "$APP_DIR" "$DMG_STAGING/"
     ln -s /Applications "$DMG_STAGING/Applications"
 
-    hdiutil create -volname "OpenClaw" \
+    hdiutil create -volname "OpenClawLauncher" \
         -srcfolder "$DMG_STAGING" \
         -ov -format UDBZ \
         "$DMG_PATH"
@@ -118,7 +118,7 @@ fi
 
 echo ""
 echo "  Done! App: $APP_DIR"
-[ -f "$DIST_DIR/OpenClaw.dmg" ] && echo "  DMG: $DIST_DIR/OpenClaw.dmg"
+[ -f "$DIST_DIR/OpenClawLauncher.dmg" ] && echo "  DMG: $DIST_DIR/OpenClawLauncher.dmg"
 echo ""
 echo "  Install: cp -r '$APP_DIR' /Applications/"
 

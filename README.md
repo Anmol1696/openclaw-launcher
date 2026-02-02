@@ -11,7 +11,7 @@ Native SwiftUI app handles everything silently in the background.
 ## How It Works
 
 ```
-User double-clicks OpenClaw.app
+User double-clicks OpenClawLauncher.app
          │
          ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -56,9 +56,9 @@ User double-clicks OpenClaw.app
 ### macOS App (recommended)
 
 1. **Install [Docker Desktop](https://docker.com/products/docker-desktop)** (one-time)
-2. **Download `OpenClaw.dmg`** from the [latest release](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
-3. Open the DMG, drag **OpenClaw.app** to `/Applications`
-4. Double-click **OpenClaw.app**
+2. **Download `OpenClawLauncher.dmg`** from the [latest release](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+3. Open the DMG, drag **OpenClawLauncher.app** to `/Applications`
+4. Double-click **OpenClawLauncher.app**
 5. Browser opens → paste token → sign in with your AI provider → start chatting
 
 Everything persists across restarts in `~/.openclaw-docker/`.
@@ -85,8 +85,8 @@ Requires Xcode (full install, not just Command Line Tools) for SwiftUI.
 cd app/macos && bash build.sh
 
 # Output:
-#   dist/OpenClaw.app    ← drag to /Applications
-#   dist/OpenClaw.dmg    ← share with others
+#   dist/OpenClawLauncher.app    ← drag to /Applications
+#   dist/OpenClawLauncher.dmg    ← share with others
 ```
 
 Or let CI build it — push to `main` and download the `.dmg` artifact from GitHub Actions.
