@@ -10,12 +10,19 @@ set -euo pipefail
 # --- Config ---
 CONTAINER_NAME="openclaw"
 IMAGE_NAME="ghcr.io/openclaw/openclaw:latest"
-STATE_DIR="$HOME/.openclaw-docker"
+STATE_DIR="$HOME/.openclaw-launcher"
 CONFIG_DIR="$STATE_DIR/config"
 WORKSPACE_DIR="$STATE_DIR/workspace"
 PORT="${OPENCLAW_PORT:-18789}"
 ENV_FILE="$STATE_DIR/.env"
 LOG_FILE="$STATE_DIR/launcher.log"
+
+# Migrate from old state dir
+OLD_STATE_DIR="$HOME/.openclaw-docker"
+if [ -d "$OLD_STATE_DIR" ] && [ ! -d "$STATE_DIR" ]; then
+    mv "$OLD_STATE_DIR" "$STATE_DIR"
+    echo "Migrated ~/.openclaw-docker → ~/.openclaw-launcher"
+fi
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -162,6 +169,11 @@ oauth_sign_in() {
         code=$(python3 -c "from urllib.parse import urlparse, parse_qs; print(parse_qs(urlparse('${raw_code}').query).get('code',[''])[0])")
     fi
 
+    # Handle code#state format from Anthropic callback
+    if [[ "$code" == *"#"* ]]; then
+        code="${code%%#*}"
+    fi
+
     if [ -z "$code" ]; then
         warn "No code provided — skipping OAuth."
         return
@@ -240,6 +252,7 @@ first_run_setup() {
 OPENCLAW_GATEWAY_TOKEN=$token
 OPENCLAW_PORT=$PORT
 EOF
+    chmod 600 "$ENV_FILE"
 
     # Write config with actual token value (not env var reference)
     cat > "$CONFIG_DIR/openclaw.json" <<CONF
@@ -253,9 +266,7 @@ EOF
     },
     "controlUi": {
       "enabled": true,
-      "allowInsecureAuth": true,
-      "basePath": "/openclaw",
-      "dangerouslyDisableDeviceAuth": true
+      "basePath": "/openclaw"
     }
   },
   "agents": {
@@ -266,6 +277,7 @@ EOF
   }
 }
 CONF
+    chmod 600 "$CONFIG_DIR/openclaw.json"
 
     # Create agent directories
     mkdir -p "$CONFIG_DIR/agents/default/agent" "$CONFIG_DIR/agents/default/sessions"
@@ -305,6 +317,7 @@ CONF
   }
 }
 AUTHEOF
+                chmod 600 "$CONFIG_DIR/agents/default/agent/auth-profiles.json"
                 ok "API key saved"
             else
                 warn "Empty key — skipped."
@@ -364,7 +377,7 @@ run_container() {
         -v "${WORKSPACE_DIR}:/home/node/.openclaw/workspace" \
         -e "HOME=/home/node" \
         -e "TERM=xterm-256color" \
-        -e "OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}" \
+        --env-file "$ENV_FILE" \
         "$IMAGE_NAME" \
         node dist/index.js gateway --bind lan --port 18789 \
         > /dev/null
