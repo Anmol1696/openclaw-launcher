@@ -21,7 +21,7 @@ public class OpenClawLauncher: ObservableObject {
     private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
-    private let imageName = "ghcr.io/openclaw/openclaw:latest"
+    private let imageName = "ghcr.io/anmol1696/openclaw-launcher:base"
     private let port: Int = 18789
     private var hasStarted = false
 
