@@ -7,10 +7,19 @@ let package = Package(
         .macOS(.v14)
     ],
     targets: [
+        .target(
+            name: "OpenClawLib",
+            path: "Sources/OpenClawLib"
+        ),
         .executableTarget(
             name: "OpenClawLauncher",
-            path: "Sources"
-        )
+            dependencies: ["OpenClawLib"],
+            path: "Sources/OpenClawApp"
+        ),
+        .testTarget(
+            name: "OpenClawTests",
+            dependencies: ["OpenClawLib"],
+            path: "Tests/OpenClawTests"
+        ),
     ]
 )
-

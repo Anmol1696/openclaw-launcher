@@ -17,13 +17,6 @@ PORT="${OPENCLAW_PORT:-18789}"
 ENV_FILE="$STATE_DIR/.env"
 LOG_FILE="$STATE_DIR/launcher.log"
 
-# Migrate from old state dir
-OLD_STATE_DIR="$HOME/.openclaw-docker"
-if [ -d "$OLD_STATE_DIR" ] && [ ! -d "$STATE_DIR" ]; then
-    mv "$OLD_STATE_DIR" "$STATE_DIR"
-    echo "Migrated ~/.openclaw-docker → ~/.openclaw-launcher"
-fi
-
 # --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -266,7 +259,8 @@ EOF
     },
     "controlUi": {
       "enabled": true,
-      "basePath": "/openclaw"
+      "basePath": "/openclaw",
+      "dangerouslyDisableDeviceAuth": true
     }
   },
   "agents": {
