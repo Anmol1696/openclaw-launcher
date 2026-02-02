@@ -14,14 +14,17 @@ DIST_DIR="$REPO_ROOT/dist"
 APP_DIR="$DIST_DIR/${APP_NAME}.app"
 CONTENTS="$APP_DIR/Contents"
 
-echo "🐙 Building ${APP_NAME}.app ..."
+# Derive version from git tag (e.g. v1.2.3 → 1.2.3), fallback to 1.0.0
+APP_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
+
+echo "🐙 Building ${APP_NAME}.app (${APP_VERSION}) ..."
 
 # ──────────────────────────────────────────────
 # 1. Compile Swift
 # ──────────────────────────────────────────────
 echo "   Compiling Swift..."
 cd "$SCRIPT_DIR"
-swift build -c release 2>&1
+swift build -c release --arch arm64 --arch x86_64 2>&1
 
 BINARY="$BUILD_DIR/release/OpenClawLauncher"
 if [ ! -f "$BINARY" ]; then
@@ -54,7 +57,7 @@ iconutil -c icns "$ICONSET_DIR" -o "$CONTENTS/Resources/AppIcon.icns"
 rm -rf "$ICONSET_DIR"
 echo "   ✅ App icon generated"
 
-cat > "$CONTENTS/Info.plist" <<'PLIST'
+cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -67,9 +70,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>
     <string>ai.openclaw.launcher</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundleExecutable</key>
     <string>OpenClawLauncher</string>
     <key>CFBundlePackageType</key>
