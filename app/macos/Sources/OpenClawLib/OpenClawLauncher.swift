@@ -68,6 +68,7 @@ public class OpenClawLauncher: ObservableObject {
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
     private var healthCheckTimer: Timer?
+    private var healthCheckFailCount = 0
     private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
@@ -258,21 +259,23 @@ public class OpenClawLauncher: ObservableObject {
         if !key.isEmpty {
             let authDir = configDir.appendingPathComponent("agents/default/agent")
             let authFile = authDir.appendingPathComponent("auth-profiles.json")
-            let json = """
-            {
-              "version": 1,
-              "profiles": {
-                "anthropic:default": {
-                  "type": "api_key",
-                  "provider": "anthropic",
-                  "key": "\(key)"
-                }
-              }
+            let payload: [String: Any] = [
+                "version": 1,
+                "profiles": [
+                    "anthropic:default": [
+                        "type": "api_key",
+                        "provider": "anthropic",
+                        "key": key
+                    ]
+                ]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted),
+               let _ = try? data.write(to: authFile) {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
+                addStep(.done, "API key saved")
+            } else {
+                addStep(.error, "Failed to save API key")
             }
-            """
-            try? json.write(to: authFile, atomically: true, encoding: .utf8)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
-            addStep(.done, "API key saved")
         } else {
             addStep(.warning, "Skipped API key — set up later in Control UI")
         }
@@ -448,7 +451,7 @@ public class OpenClawLauncher: ObservableObject {
             gatewayStatusData = nil
             isFirstRun = false
             hasStarted = false
-            state = .idle
+            state = .stopped
             menuBarStatus = .stopped
             authExpiredBanner = nil
             stopHealthCheck()
@@ -473,6 +476,9 @@ public class OpenClawLauncher: ObservableObject {
 
             steps = []
             gatewayHealthy = false
+            uptimeTick = 0
+            containerStartTime = nil
+            hasStarted = false
             menuBarStatus = .stopped
             state = .needsAuth
         }
@@ -646,8 +652,8 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Pulling image...")
-        pullProgressText = "Connecting..."
+        addStep(.running, "Pulling latest image... this may take a moment")
+        pullProgressText = nil
 
         let pull = try await shell("docker", "pull", imageName)
         pullProgressText = nil
@@ -792,9 +798,7 @@ public class OpenClawLauncher: ObservableObject {
             let (data, response) = try await URLSession.shared.data(from: url)
 
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                await MainActor.run {
-                    gatewayHealthy = false
-                }
+                await handleHealthCheckFailure()
                 return
             }
 
@@ -802,15 +806,35 @@ public class OpenClawLauncher: ObservableObject {
             await MainActor.run {
                 gatewayHealthy = true
                 gatewayStatusData = status
+                healthCheckFailCount = 0
             }
         } catch {
             let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
-            let healthy = check?.exitCode == 0
-            await MainActor.run {
-                gatewayHealthy = healthy
-                if !healthy {
-                    gatewayStatusData = nil
+            if check?.exitCode == 0 {
+                await MainActor.run {
+                    gatewayHealthy = true
+                    healthCheckFailCount = 0
                 }
+            } else {
+                await handleHealthCheckFailure()
+            }
+        }
+    }
+
+    @MainActor private func handleHealthCheckFailure() async {
+        gatewayHealthy = false
+        gatewayStatusData = nil
+        healthCheckFailCount += 1
+
+        // After 3 consecutive failures, check if container is still running
+        if healthCheckFailCount >= 3 {
+            let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}")
+            let running = !(ps?.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            if !running {
+                addStep(.error, "Container stopped unexpectedly")
+                state = .error
+                menuBarStatus = .stopped
+                stopHealthCheck()
             }
         }
     }
