@@ -87,7 +87,14 @@ PLIST
 echo "   ✅ .app bundle created"
 
 # ──────────────────────────────────────────────
-# 3. Create .dmg
+# 3. Ad-hoc code sign (prevents macOS "damaged" error)
+# ──────────────────────────────────────────────
+echo "   Code signing (ad-hoc)..."
+codesign --force --deep --sign - "$APP_DIR"
+echo "   ✅ Signed"
+
+# ──────────────────────────────────────────────
+# 4. Create .dmg
 # ──────────────────────────────────────────────
 if command -v hdiutil &>/dev/null; then
     echo "   Creating DMG..."
