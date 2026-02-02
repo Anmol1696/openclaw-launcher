@@ -24,6 +24,7 @@ build: ## Build a single flavor (FLAVOR=base|lite|full)
 	$(DOCKER) build \
 		--target $(FLAVOR) \
 		-f $(DOCKERFILE) \
+		--load \
 		-t $(DOCKER_REPO):$(FLAVOR) \
 		$(CONTEXT)
 

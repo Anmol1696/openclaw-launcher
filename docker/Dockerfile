@@ -79,11 +79,16 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    # Chromium runtime deps (what --with-deps would install, but done here
+    # in a single apt layer to avoid stale GPG cache issues)
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
+    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install playwright CLI (upstream only has playwright-core, not the full package)
-# --with-deps installs system libraries (libgbm, libnss3, etc.) so must run as root
+# Install playwright CLI + download Chromium binary (no --with-deps needed)
 RUN npm install -g playwright \
-    && playwright install --with-deps chromium
+    && playwright install chromium
 
 USER node
