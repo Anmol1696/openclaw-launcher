@@ -81,7 +81,9 @@ enum AnthropicOAuth {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? "<error>"
-            throw NSError(domain: "AnthropicOAuth", code: (response as? HTTPURLResponse)?.statusCode ?? 0,
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            print("[OpenClaw] Token exchange failed (HTTP \(status)): \(text)")
+            throw NSError(domain: "AnthropicOAuth", code: status,
                           userInfo: [NSLocalizedDescriptionKey: "Token exchange failed: \(text)"])
         }
 
@@ -477,6 +479,13 @@ class OpenClawLauncher: ObservableObject {
             code = codeParam
         }
 
+        // Anthropic returns code in "code#state" format — split on #
+        if code.contains("#") {
+            let parts = code.split(separator: "#", maxSplits: 1)
+            code = String(parts[0])
+        }
+
+        print("[OpenClaw] Exchanging code: \(code.prefix(8))...")
         addStep(.running, "Exchanging authorization code...")
         state = .working
 
