@@ -259,7 +259,8 @@ EOF
     },
     "controlUi": {
       "enabled": true,
-      "basePath": "/openclaw"
+      "basePath": "/openclaw",
+      "dangerouslyDisableDeviceAuth": true
     }
   },
   "agents": {

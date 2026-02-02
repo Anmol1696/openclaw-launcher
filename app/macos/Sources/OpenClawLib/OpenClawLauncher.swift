@@ -394,7 +394,8 @@ public class OpenClawLauncher: ObservableObject {
     },
     "controlUi": {
       "enabled": true,
-      "basePath": "/openclaw"
+      "basePath": "/openclaw",
+      "dangerouslyDisableDeviceAuth": true
     }
   },
   "agents": {
