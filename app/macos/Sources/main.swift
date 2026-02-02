@@ -1,11 +1,8 @@
 // ============================================================================
 //  OpenClaw Launcher — Native macOS App (SwiftUI)
+//  UI Improvements: Dashboard, Progress Bar, Dark Mode, Menu Bar
 //
-//  Zero terminal. User double-clicks → sees a small native window →
-//  Docker runs in background → browser opens with Control UI.
-//
-//  Build: swiftc -o OpenClawLauncher main.swift (or use Xcode)
-//  Or use the Package.swift to build via `swift build`
+//  Build: swift build
 // ============================================================================
 
 import SwiftUI
@@ -107,6 +104,18 @@ struct OAuthCredentials {
     let expires: Int64
 }
 
+// MARK: - Gateway Status
+
+struct GatewayStatus: Codable {
+    struct ChannelStatus: Codable {
+        let enabled: Bool
+        let connected: Bool?
+    }
+    
+    let channels: [String: ChannelStatus]?
+    let uptime: Int?
+}
+
 // MARK: - App Entry Point
 
 @main
@@ -116,11 +125,67 @@ struct OpenClawApp: App {
     var body: some Scene {
         WindowGroup {
             LauncherView(launcher: launcher)
-                .frame(width: 480, height: 520)
+                .frame(width: 520, height: launcher.state == .running ? 580 : 520)
                 .onAppear { launcher.start() }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+        
+        // Menu Bar Extra (macOS 13+)
+        MenuBarExtra {
+            MenuBarContent(launcher: launcher)
+        } label: {
+            Image(systemName: "circle.fill")
+                .foregroundStyle(launcher.menuBarStatus == .running ? .green : 
+                               launcher.menuBarStatus == .starting ? .yellow : .red)
+        }
+    }
+}
+
+// MARK: - Menu Bar Content
+
+struct MenuBarContent: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        Button("Open Control UI") {
+            launcher.openBrowser()
+        }
+        .disabled(launcher.state != .running)
+        
+        Divider()
+        
+        Button("Restart") {
+            Task {
+                await launcher.restartContainer()
+            }
+        }
+        .disabled(launcher.state != .running)
+        
+        Button("Stop") {
+            launcher.stopContainer()
+        }
+        .disabled(launcher.state != .running)
+        
+        Divider()
+        
+        Button("View Logs") {
+            launcher.viewLogs()
+        }
+        
+        Button("Show Window") {
+            NSApp.activate(ignoringOtherApps: true)
+            if let window = NSApp.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        
+        Divider()
+        
+        Button("Quit") {
+            NSApp.terminate(nil)
+        }
+        .keyboardShortcut("q")
     }
 }
 
@@ -131,25 +196,277 @@ struct LauncherView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 8) {
-                Text("🐙")
-                    .font(.system(size: 48))
-                Text("OpenClawLauncher")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("Isolated AI Agent • Docker Powered")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+            // Header with gradient
+            ZStack {
+                LinearGradient(
+                    colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.6)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(height: 120)
+                
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 42))
+                            .foregroundStyle(.white)
+                        Text("🐙")
+                            .font(.system(size: 42))
+                    }
+                    Text("OpenClaw Launcher")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Isolated AI Agent • Docker Powered")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
             }
-            .padding(.top, 32)
-            .padding(.bottom, 24)
 
-            Divider()
+            // Content area
+            if launcher.state == .running {
+                DashboardView(launcher: launcher)
+            } else {
+                SetupView(launcher: launcher)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
 
-            // Status steps
+// MARK: - Dashboard View (After Launch)
+
+struct DashboardView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // Container Status Card
+                StatusCard(
+                    title: "Container Status",
+                    icon: "server.rack",
+                    iconColor: launcher.gatewayHealthy ? .green : .orange
+                ) {
+                    HStack {
+                        Circle()
+                            .fill(launcher.gatewayHealthy ? Color.green : Color.orange)
+                            .frame(width: 12, height: 12)
+                        Text(launcher.gatewayHealthy ? "Running" : "Starting")
+                            .font(.system(size: 14, weight: .medium))
+                        Spacer()
+                        Text(launcher.uptimeString)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // Channel Status Cards
+                if let status = launcher.gatewayStatusData {
+                    if let channels = status.channels {
+                        VStack(spacing: 12) {
+                            ForEach(["web", "telegram", "whatsapp"], id: \.self) { channel in
+                                if let channelStatus = channels[channel] {
+                                    ChannelCard(
+                                        name: channel.capitalized,
+                                        enabled: channelStatus.enabled,
+                                        connected: channelStatus.connected ?? false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Quick Actions
+                VStack(spacing: 12) {
+                    Button(action: { launcher.openBrowser() }) {
+                        HStack {
+                            Image(systemName: "arrow.up.forward.app")
+                            Text("Open Control UI")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    
+                    HStack(spacing: 12) {
+                        Button(action: { launcher.viewLogs() }) {
+                            HStack {
+                                Image(systemName: "doc.text")
+                                Text("View Logs")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button(action: { 
+                            Task { await launcher.restartContainer() }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Restart")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button(action: { launcher.stopContainer() }) {
+                            HStack {
+                                Image(systemName: "stop.circle")
+                                Text("Stop")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .controlSize(.large)
+                }
+                
+                // Token (collapsed)
+                if let token = launcher.gatewayToken {
+                    DisclosureGroup("Gateway Token") {
+                        HStack {
+                            Text(token.prefix(24) + "...")
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                            Spacer()
+                            Button("Copy") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(token, forType: .string)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+struct StatusCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let iconColor: Color
+    @ViewBuilder let content: Content
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundStyle(iconColor)
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+    }
+}
+
+struct ChannelCard: View {
+    let name: String
+    let enabled: Bool
+    let connected: Bool
+    
+    var body: some View {
+        HStack {
+            Image(systemName: channelIcon(name))
+                .foregroundStyle(statusColor)
+            Text(name)
+                .font(.system(size: 14, weight: .medium))
+            Spacer()
+            Circle()
+                .fill(statusColor)
+                .frame(width: 10, height: 10)
+            Text(statusText)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
+    }
+    
+    private var statusColor: Color {
+        if !enabled { return .gray }
+        return connected ? .green : .orange
+    }
+    
+    private var statusText: String {
+        if !enabled { return "Disabled" }
+        return connected ? "Connected" : "Connecting"
+    }
+    
+    private func channelIcon(_ name: String) -> String {
+        switch name.lowercased() {
+        case "web": return "globe"
+        case "telegram": return "paperplane.fill"
+        case "whatsapp": return "message.fill"
+        default: return "antenna.radiowaves.left.and.right"
+        }
+    }
+}
+
+// MARK: - Setup View (During Launch)
+
+struct SetupView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Progress area
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(launcher.steps) { step in
+                VStack(alignment: .leading, spacing: 16) {
+                    if launcher.state == .working {
+                        // Progress bar + current step
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let current = launcher.currentStep {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                    Text(current.message)
+                                        .font(.system(size: 14, weight: .medium))
+                                }
+                            }
+                            
+                            ProgressView(value: launcher.progress)
+                                .progressViewStyle(.linear)
+                        }
+                        .padding(16)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(10)
+                        
+                        // Completed summary
+                        if launcher.completedStepsCount > 0 {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("✅ \(launcher.completedStepsCount) steps completed")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        // Show all steps for non-working states
+                        ForEach(launcher.steps) { step in
+                            StepRow(step: step)
+                        }
+                    }
+                    
+                    // Show errors prominently
+                    ForEach(launcher.errorSteps) { step in
                         StepRow(step: step)
                     }
                 }
@@ -160,108 +477,16 @@ struct LauncherView: View {
 
             // Bottom actions
             VStack(spacing: 12) {
-                if launcher.state == .running {
-                    // Token display
-                    if let token = launcher.gatewayToken {
-                        HStack {
-                            Text("Token:")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(token.prefix(16) + "...")
-                                .font(.system(size: 12, design: .monospaced))
-                                .textSelection(.enabled)
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(token, forType: .string)
-                                launcher.addStep(.done, "Token copied to clipboard")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        Button("Open Control UI") {
-                            launcher.openBrowser()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-
-                        Button("Stop") {
-                            launcher.stopContainer()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                    }
-                } else if launcher.state == .needsAuth {
-                    VStack(spacing: 12) {
-                        Text("Authentication")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Choose how to connect to Anthropic.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-
-                        VStack(spacing: 8) {
-                            Button("Sign in with Claude") {
-                                launcher.startOAuth()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-
-                            Button("Use API Key") {
-                                launcher.showApiKeyInput()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-
-                            Button("Skip") {
-                                launcher.skipAuth()
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 12))
-                        }
-                    }
+                if launcher.state == .needsAuth {
+                    AuthChoiceView(launcher: launcher)
                 } else if launcher.state == .waitingForOAuthCode {
-                    VStack(spacing: 12) {
-                        if launcher.showApiKeyField {
-                            Text("API Key Setup")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Enter your Anthropic API key.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            SecureField("sk-ant-...", text: $launcher.apiKeyInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(maxWidth: 360)
-                            HStack(spacing: 12) {
-                                Button("Continue") { launcher.submitApiKey() }
-                                    .buttonStyle(.borderedProminent).controlSize(.large)
-                                Button("Back") { launcher.state = .needsAuth }
-                                    .buttonStyle(.bordered).controlSize(.large)
-                            }
-                        } else {
-                            Text("Paste Authorization Code")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Sign in on the browser page that opened,\nthen copy the code and paste it below.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                            TextField("Paste code or URL here...", text: $launcher.oauthCodeInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(maxWidth: 360)
-                            HStack(spacing: 12) {
-                                Button("Exchange") { launcher.exchangeOAuthCode() }
-                                    .buttonStyle(.borderedProminent).controlSize(.large)
-                                    .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                Button("Back") { launcher.state = .needsAuth }
-                                    .buttonStyle(.bordered).controlSize(.large)
-                            }
-                        }
+                    if launcher.showApiKeyField {
+                        ApiKeyInputView(launcher: launcher)
+                    } else {
+                        OAuthCodeInputView(launcher: launcher)
                     }
                 } else if launcher.state == .stopped {
-                    Button("Start OpenClawLauncher") {
+                    Button("Start OpenClaw") {
                         launcher.start()
                     }
                     .buttonStyle(.borderedProminent)
@@ -278,7 +503,8 @@ struct LauncherView: View {
                         }
                         .buttonStyle(.bordered)
                     }
-                } else {
+                    .controlSize(.large)
+                } else if launcher.state == .working {
                     ProgressView()
                         .scaleEffect(0.8)
                     Text("Setting up...")
@@ -288,7 +514,91 @@ struct LauncherView: View {
             }
             .padding(20)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+struct AuthChoiceView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Authentication")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Choose how to connect to Anthropic.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                Button("Sign in with Claude") {
+                    launcher.startOAuth()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button("Use API Key") {
+                    launcher.showApiKeyInput()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                Button("Skip") {
+                    launcher.skipAuth()
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+            }
+        }
+    }
+}
+
+struct ApiKeyInputView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("API Key Setup")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Enter your Anthropic API key.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            SecureField("sk-ant-...", text: $launcher.apiKeyInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(maxWidth: 360)
+            HStack(spacing: 12) {
+                Button("Continue") { launcher.submitApiKey() }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                Button("Back") { launcher.state = .needsAuth }
+                    .buttonStyle(.bordered).controlSize(.large)
+            }
+        }
+    }
+}
+
+struct OAuthCodeInputView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Paste Authorization Code")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Sign in on the browser page that opened,\nthen copy the code and paste it below.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            TextField("Paste code or URL here...", text: $launcher.oauthCodeInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(maxWidth: 360)
+            HStack(spacing: 12) {
+                Button("Exchange") { launcher.exchangeOAuthCode() }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Back") { launcher.state = .needsAuth }
+                    .buttonStyle(.bordered).controlSize(.large)
+            }
+        }
     }
 }
 
@@ -324,6 +634,7 @@ struct StepRow: View {
                 .foregroundStyle(step.status == .error ? .red : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 4)
     }
 }
 
@@ -332,6 +643,8 @@ struct StepRow: View {
 enum StepStatus { case pending, running, done, error, warning }
 
 enum LauncherState { case idle, working, needsAuth, waitingForOAuthCode, running, stopped, error }
+
+enum MenuBarStatus { case starting, running, stopped }
 
 struct LaunchStep: Identifiable {
     let id = UUID()
@@ -349,8 +662,15 @@ class OpenClawLauncher: ObservableObject {
     @Published var apiKeyInput: String = ""
     @Published var oauthCodeInput: String = ""
     @Published var showApiKeyField: Bool = false
+    @Published var gatewayHealthy: Bool = false
+    @Published var gatewayStatusData: GatewayStatus?
+    @Published var menuBarStatus: MenuBarStatus = .stopped
+    @Published var containerStartTime: Date?
+    
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
+    private var healthCheckTimer: Timer?
+    private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
@@ -365,6 +685,34 @@ class OpenClawLauncher: ObservableObject {
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
 
+    // MARK: - Computed Properties for UI
+    
+    var currentStep: LaunchStep? {
+        steps.last(where: { $0.status == .running })
+    }
+    
+    var completedStepsCount: Int {
+        steps.filter { $0.status == .done }.count
+    }
+    
+    var errorSteps: [LaunchStep] {
+        steps.filter { $0.status == .error }
+    }
+    
+    var progress: Double {
+        let total = 8.0 // Approximate total steps
+        return min(Double(completedStepsCount) / total, 1.0)
+    }
+    
+    var uptimeString: String {
+        guard let start = containerStartTime else { return "00:00:00" }
+        let elapsed = Int(Date().timeIntervalSince(start))
+        let hours = elapsed / 3600
+        let minutes = (elapsed % 3600) / 60
+        let seconds = elapsed % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
     // MARK: - Public
 
     func start() {
@@ -372,6 +720,7 @@ class OpenClawLauncher: ObservableObject {
         hasStarted = true
         steps = []
         state = .working
+        menuBarStatus = .starting
 
         Task {
             do {
@@ -388,17 +737,27 @@ class OpenClawLauncher: ObservableObject {
             } catch {
                 addStep(.error, error.localizedDescription)
                 state = .error
+                menuBarStatus = .stopped
             }
         }
     }
 
     func stopContainer() {
         Task {
-            addStep(.running, "Stopping OpenClawLauncher...")
+            addStep(.running, "Stopping OpenClaw...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
             state = .stopped
+            menuBarStatus = .stopped
+            stopHealthCheck()
         }
+    }
+    
+    func restartContainer() async {
+        addStep(.running, "Restarting...")
+        _ = try? await shell("docker", "restart", containerName)
+        addStep(.done, "Restarted")
+        containerStartTime = Date()
     }
 
     func submitApiKey() {
@@ -531,6 +890,9 @@ class OpenClawLauncher: ObservableObject {
         try await waitForGateway()
 
         state = .running
+        menuBarStatus = .running
+        containerStartTime = Date()
+        startHealthCheck()
         openBrowser()
     }
 
@@ -560,6 +922,64 @@ class OpenClawLauncher: ObservableObject {
         steps.append(LaunchStep(status: status, message: message))
         if steps.count > 50 {
             steps.removeFirst(steps.count - 50)
+        }
+    }
+    
+    // MARK: - Health Check
+    
+    private func startHealthCheck() {
+        stopHealthCheck()
+        
+        // Start uptime timer
+        uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
+        }
+        
+        // Start health check timer
+        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task {
+                await self?.checkGatewayHealth()
+            }
+        }
+        
+        // Initial check
+        Task {
+            await checkGatewayHealth()
+        }
+    }
+    
+    private func stopHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+        uptimeTimer?.invalidate()
+        uptimeTimer = nil
+    }
+    
+    private func checkGatewayHealth() async {
+        do {
+            let url = URL(string: "http://localhost:\(port)/openclaw/api/status")!
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                await MainActor.run {
+                    gatewayHealthy = false
+                }
+                return
+            }
+            
+            let status = try JSONDecoder().decode(GatewayStatus.self, from: data)
+            await MainActor.run {
+                gatewayHealthy = true
+                gatewayStatusData = status
+            }
+        } catch {
+            // Fallback to simple health check
+            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
+            await MainActor.run {
+                gatewayHealthy = check?.exitCode == 0
+            }
         }
     }
 
