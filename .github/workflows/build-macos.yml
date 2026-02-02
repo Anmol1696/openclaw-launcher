@@ -5,11 +5,17 @@ on:
     branches: [main]
     paths:
       - "app/macos/**"
+    tags:
+      - "v*"
   pull_request:
     branches: [main]
     paths:
       - "app/macos/**"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-macos
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -18,31 +24,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          fi
+          echo "Using $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Build Swift
-        working-directory: app/macos
-        run: swift build -c release
-
-      - name: Create .app bundle and .dmg
+      - name: Build .app and .dmg
         working-directory: app/macos
         run: bash build.sh
-
-      - name: Upload .app
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenClaw.app
-          path: dist/OpenClaw.app
 
       - name: Upload .dmg
         uses: actions/upload-artifact@v4
         with:
           name: OpenClaw.dmg
           path: dist/OpenClaw.dmg
+          compression-level: 0
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/OpenClaw.dmg
+          files: dist/OpenClaw.dmg

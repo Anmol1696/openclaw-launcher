@@ -91,8 +91,8 @@ if command -v hdiutil &>/dev/null; then
 
     hdiutil create -volname "OpenClaw" \
         -srcfolder "$DMG_STAGING" \
-        -ov -format UDZO \
-        "$DMG_PATH" 2>/dev/null
+        -ov -format UDBZ \
+        "$DMG_PATH"
 
     rm -rf "$DMG_STAGING"
     [ -f "$DMG_PATH" ] && echo "   ✅ DMG created"
