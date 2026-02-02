@@ -33,6 +33,12 @@ public struct ShellResult {
     }
 }
 
+// MARK: - Shell Executor Protocol
+
+public protocol ShellExecutor: Sendable {
+    func run(_ args: [String]) async throws -> ShellResult
+}
+
 public enum LauncherError: LocalizedError {
     case dockerNotRunning
     case dockerInstallFailed(String)
