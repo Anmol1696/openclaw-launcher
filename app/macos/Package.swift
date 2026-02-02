@@ -21,5 +21,10 @@ let package = Package(
             dependencies: ["OpenClawLib"],
             path: "Tests/OpenClawTests"
         ),
+        .testTarget(
+            name: "OpenClawIntegrationTests",
+            dependencies: ["OpenClawLib"],
+            path: "Tests/OpenClawIntegrationTests"
+        ),
     ]
 )

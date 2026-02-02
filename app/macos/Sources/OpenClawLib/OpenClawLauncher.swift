@@ -81,10 +81,7 @@ public class OpenClawLauncher: ObservableObject {
     private let gatewayRetryCount: Int
     private let gatewayRetryDelayNs: UInt64
 
-    private var stateDir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".openclaw-launcher")
-    }
+    private let stateDir: URL
     private var configDir: URL { stateDir.appendingPathComponent("config") }
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
@@ -95,12 +92,15 @@ public class OpenClawLauncher: ObservableObject {
 
     public init(
         shell: ShellExecutor = ProcessShellExecutor(),
+        stateDir: URL? = nil,
         dockerRetryCount: Int = 45,
         dockerRetryDelayNs: UInt64 = 2_000_000_000,
         gatewayRetryCount: Int = 30,
         gatewayRetryDelayNs: UInt64 = 1_000_000_000
     ) {
         self.shellExecutor = shell
+        self.stateDir = stateDir ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".openclaw-launcher")
         self.dockerRetryCount = dockerRetryCount
         self.dockerRetryDelayNs = dockerRetryDelayNs
         self.gatewayRetryCount = gatewayRetryCount
@@ -404,6 +404,10 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func viewLogs() {
+        guard !suppressSideEffects else {
+            addStep(.done, "Opened logs in Terminal")
+            return
+        }
         let script = "tell application \"Terminal\" to do script \"docker logs -f \(containerName)\""
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(nil)
