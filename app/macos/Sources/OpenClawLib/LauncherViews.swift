@@ -78,13 +78,8 @@ public struct LauncherView: View {
                 .frame(height: 120)
 
                 VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 42))
-                            .foregroundStyle(.white)
-                        Text("🐙")
-                            .font(.system(size: 42))
-                    }
+                    Text("🐙")
+                        .font(.system(size: 48))
                     Text("OpenClaw Launcher")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)

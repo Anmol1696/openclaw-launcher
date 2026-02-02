@@ -19,18 +19,7 @@ struct OpenClawApp: App {
         MenuBarExtra {
             MenuBarContent(launcher: launcher)
         } label: {
-            HStack(spacing: 2) {
-                Text("🐙")
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
-                    .foregroundStyle({
-                        switch launcher.menuBarStatus {
-                        case .running: return Color.green
-                        case .starting: return Color.yellow
-                        case .stopped: return Color.red
-                        }
-                    }())
-            }
+            Text("🐙")
         }
     }
 }
