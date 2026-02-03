@@ -82,6 +82,7 @@ jobs:
 
           rm -f "$RUNNER_TEMP/certificate.p12"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
           echo "SIGNING_AVAILABLE=true" >> $GITHUB_ENV
 
       - name: Store notarization credentials
@@ -108,10 +109,13 @@ jobs:
       - name: Build and sign
         working-directory: app/macos
         run: |
+          # Ensure keychain is unlocked for codesign
+          if [ -n "$KEYCHAIN_PATH" ]; then
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          fi
           if [ "$SIGNING_AVAILABLE" = "true" ]; then
             export DEVELOPER_ID="Developer ID Application"
           fi
-          # Build without notarization (handled separately for better visibility)
           bash build.sh
 
       - name: Notarize DMG
@@ -120,25 +124,31 @@ jobs:
         run: |
           DMG_PATH="dist/OpenClawLauncher.dmg"
 
+          # Verify DMG exists
+          if [ ! -f "$DMG_PATH" ]; then
+            echo "❌ DMG not found: $DMG_PATH"
+            exit 1
+          fi
+
+          # Ensure keychain is unlocked
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
           echo "Submitting for notarization..."
-          xcrun notarytool submit "$DMG_PATH" \
-            --keychain-profile "AC_PASSWORD" \
+          if xcrun notarytool submit "$DMG_PATH" \
             --keychain "$KEYCHAIN_PATH" \
+            --keychain-profile "AC_PASSWORD" \
             --wait \
             --timeout 60m \
-            2>&1 | tee notarization.log
-
-          # Check result
-          if grep -q "status: Accepted" notarization.log; then
+            2>&1 | tee notarization.log; then
             echo "✅ Notarization successful"
           else
             echo "❌ Notarization failed or timed out"
-            SUBMISSION_ID=$(grep -o 'id: [a-f0-9-]*' notarization.log | head -1 | cut -d' ' -f2)
+            SUBMISSION_ID=$(grep 'id:' notarization.log | head -1 | awk '{print $2}')
             if [ -n "$SUBMISSION_ID" ]; then
               echo "Fetching notarization log for $SUBMISSION_ID..."
               xcrun notarytool log "$SUBMISSION_ID" \
-                --keychain-profile "AC_PASSWORD" \
-                --keychain "$KEYCHAIN_PATH" || true
+                --keychain "$KEYCHAIN_PATH" \
+                --keychain-profile "AC_PASSWORD" || true
             fi
             exit 1
           fi
@@ -147,7 +157,12 @@ jobs:
           xcrun stapler staple "$DMG_PATH"
 
           echo "Verifying signature..."
-          spctl -a -vvv -t install "$DMG_PATH"
+          # Mount DMG and verify the app inside
+          MOUNT_POINT=$(mktemp -d)
+          hdiutil attach "$DMG_PATH" -nobrowse -mountpoint "$MOUNT_POINT"
+          spctl -a -vvv -t install "$MOUNT_POINT/OpenClawLauncher.app"
+          hdiutil detach "$MOUNT_POINT"
+          echo "✅ Verification passed"
 
       - name: Cleanup keychain
         if: always()

@@ -129,22 +129,6 @@ if command -v hdiutil &>/dev/null; then
 
     rm -rf "$DMG_STAGING"
     [ -f "$DMG_PATH" ] && echo "   ✅ DMG created"
-
-    # ──────────────────────────────────────────────
-    # 5. Notarization (optional)
-    # ──────────────────────────────────────────────
-    # NOTARIZE: Set to "1" to notarize with Apple
-    # Requires: xcrun notarytool store-credentials "AC_PASSWORD" first
-    if [ -n "${NOTARIZE:-}" ] && [ "$NOTARIZE" = "1" ]; then
-        echo "   Notarizing with Apple..."
-        xcrun notarytool submit "$DMG_PATH" \
-            --keychain-profile "AC_PASSWORD" \
-            --wait \
-            --timeout 60m
-        echo "   Stapling notarization ticket..."
-        xcrun stapler staple "$DMG_PATH"
-        echo "   ✅ Notarized and stapled"
-    fi
 fi
 
 echo ""
