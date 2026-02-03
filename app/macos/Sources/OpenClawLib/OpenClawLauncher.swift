@@ -749,7 +749,7 @@ public class OpenClawLauncher: ObservableObject {
 
         for _ in 0..<gatewayRetryCount {
             try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
-            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
+            let check = try? await shell("curl", "-s", "--connect-timeout", "2", "http://localhost:\(port)/openclaw/")
             if check?.exitCode == 0 {
                 addStep(.done, "Gateway is ready!")
                 return
@@ -809,7 +809,7 @@ public class OpenClawLauncher: ObservableObject {
                 healthCheckFailCount = 0
             }
         } catch {
-            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
+            let check = try? await shell("curl", "-s", "--connect-timeout", "2", "http://localhost:\(port)/openclaw/")
             if check?.exitCode == 0 {
                 await MainActor.run {
                     gatewayHealthy = true

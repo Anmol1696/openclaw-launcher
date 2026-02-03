@@ -1,13 +1,24 @@
 #!/bin/bash
 # ============================================================================
-#  OpenClaw Launcher — shell-based runner for developers
+#  OpenClaw Launcher — shell-based runner
 #  Runs OpenClaw Gateway in an isolated Docker container.
 #  Control UI opens in your browser at http://localhost:18789
+#
+#  Usage:
+#    curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/run.sh | bash
+#
+#  Or clone and run:
+#    ./run.sh           # Start
+#    ./run.sh stop      # Stop
+#    ./run.sh logs      # Follow logs
+#    ./run.sh status    # Check if running
+#    ./run.sh reset     # Nuke and start fresh
 # ============================================================================
 
 set -euo pipefail
 
 # --- Config ---
+VERSION="1.0.0"
 CONTAINER_NAME="openclaw"
 IMAGE_NAME="ghcr.io/openclaw/openclaw:latest"
 STATE_DIR="$HOME/.openclaw-launcher"
@@ -16,6 +27,18 @@ WORKSPACE_DIR="$STATE_DIR/workspace"
 PORT="${OPENCLAW_PORT:-18789}"
 ENV_FILE="$STATE_DIR/.env"
 LOG_FILE="$STATE_DIR/launcher.log"
+
+# --- Check required tools ---
+check_requirements() {
+    local missing=()
+    command -v curl &>/dev/null || missing+=("curl")
+    command -v python3 &>/dev/null || missing+=("python3")
+    command -v openssl &>/dev/null || missing+=("openssl")
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        fail "Missing required tools: ${missing[*]}"
+    fi
+}
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -30,82 +53,72 @@ warn() { echo -e "${YELLOW}⚠️${NC}  $*"; }
 fail() { echo -e "${RED}❌${NC} $*"; exit 1; }
 
 # ============================================================================
-#  Step 1a: Install Docker Desktop (macOS only)
+#  Step 1a: Show Docker install instructions
 # ============================================================================
-install_docker() {
-    log "Docker Desktop not found. Downloading..."
-
-    local arch
-    arch=$(uname -m)
-    local dmg_url
-    if [ "$arch" = "arm64" ]; then
-        dmg_url="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+show_docker_install_guide() {
+    echo ""
+    echo -e "   ${RED}Docker Desktop is required but not installed.${NC}"
+    echo ""
+    echo "   To install Docker Desktop:"
+    echo ""
+    if [ "$(uname)" = "Darwin" ]; then
+        echo "   1. Download from: https://www.docker.com/products/docker-desktop/"
+        echo "   2. Open the .dmg and drag Docker to Applications"
+        echo "   3. Launch Docker Desktop and wait for it to start"
+        echo "   4. Run this script again"
+        echo ""
+        echo "   Or with Homebrew:"
+        echo "   ${CYAN}brew install --cask docker${NC}"
     else
-        dmg_url="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+        echo "   Follow the guide for your OS:"
+        echo "   https://docs.docker.com/engine/install/"
     fi
-
-    local dmg_path="/tmp/Docker.dmg"
-    rm -f "$dmg_path"
-
-    log "Downloading Docker Desktop ($arch)... This may take a few minutes."
-    curl -L -o "$dmg_path" "$dmg_url" || fail "Download failed."
-
-    ok "Download complete."
-    log "Installing Docker Desktop..."
-
-    hdiutil attach -nobrowse -quiet "$dmg_path" || fail "Failed to mount DMG."
-
-    if [ ! -d "/Volumes/Docker/Docker.app" ]; then
-        hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
-        fail "Docker.app not found in mounted DMG."
-    fi
-
-    if cp -R "/Volumes/Docker/Docker.app" "/Applications/Docker.app" 2>/dev/null; then
-        ok "Docker Desktop installed."
-    else
-        warn "Requesting administrator permission to install..."
-        sudo cp -R "/Volumes/Docker/Docker.app" "/Applications/Docker.app" || {
-            hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
-            fail "Installation failed."
-        }
-        ok "Docker Desktop installed."
-    fi
-
-    hdiutil detach "/Volumes/Docker" -quiet 2>/dev/null
-    rm -f "$dmg_path"
+    echo ""
+    exit 1
 }
 
 # ============================================================================
 #  Step 1b: Check Docker
 # ============================================================================
 check_docker() {
-    if ! command -v docker &>/dev/null && [ ! -d "/Applications/Docker.app" ]; then
-        if [ "$(uname)" = "Darwin" ]; then
-            install_docker
+    # Check if docker CLI exists
+    if ! command -v docker &>/dev/null; then
+        # On macOS, also check for Docker.app
+        if [ "$(uname)" = "Darwin" ] && [ -d "/Applications/Docker.app" ]; then
+            # Docker.app exists but CLI not in PATH — try to start it
+            :
         else
-            fail "Docker not found. Install Docker first: https://docs.docker.com/engine/install/"
+            show_docker_install_guide
         fi
     fi
 
+    # Check if Docker daemon is running
     if ! docker info &>/dev/null 2>&1; then
-        warn "Docker is installed but not running. Starting Docker Desktop..."
         if [ "$(uname)" = "Darwin" ]; then
-            open -a "Docker"
-            log "Waiting for Docker to start (this can take 30-60 seconds)..."
-            for i in $(seq 1 60); do
-                if docker info &>/dev/null 2>&1; then
-                    ok "Docker is ready."
-                    return 0
-                fi
-                sleep 2
-                printf "."
-            done
-            echo ""
-            fail "Docker didn't start in time. Please start Docker Desktop manually."
+            if [ -d "/Applications/Docker.app" ]; then
+                warn "Docker Desktop is installed but not running. Starting it..."
+                open -a "Docker"
+                log "Waiting for Docker to start (this can take 30-60 seconds)..."
+                for i in $(seq 1 60); do
+                    if docker info &>/dev/null 2>&1; then
+                        echo ""
+                        ok "Docker is ready."
+                        return 0
+                    fi
+                    sleep 2
+                    printf "."
+                done
+                echo ""
+                fail "Docker didn't start in time. Please start Docker Desktop manually and try again."
+            else
+                show_docker_install_guide
+            fi
         else
-            fail "Please start Docker and try again."
+            fail "Docker daemon is not running. Please start Docker and try again."
         fi
     fi
+
+    ok "Docker is running."
 }
 
 # ============================================================================
@@ -390,7 +403,7 @@ run_container() {
     # Wait for Gateway to be ready
     log "Waiting for Gateway..."
     for i in $(seq 1 30); do
-        if curl -sf "http://localhost:${OPENCLAW_PORT}/openclaw/" > /dev/null 2>&1; then
+        if curl -s --connect-timeout 2 "http://localhost:${OPENCLAW_PORT}/openclaw/" > /dev/null 2>&1; then
             echo ""
             ok "OpenClawLauncher is running!"
             open_browser
@@ -432,12 +445,13 @@ open_browser() {
 main() {
     echo ""
     echo "  ╔═══════════════════════════════════════╗"
-    echo "  ║       🐙  OpenClawLauncher           ║"
+    echo "  ║       🐙  OpenClaw Launcher  v${VERSION}     ║"
     echo "  ╠═══════════════════════════════════════╣"
     echo "  ║  Isolated Docker · Browser Control UI ║"
     echo "  ╚═══════════════════════════════════════╝"
     echo ""
 
+    check_requirements
     check_docker
     first_run_setup
     pull_image

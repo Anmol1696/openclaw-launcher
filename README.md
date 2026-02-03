@@ -28,7 +28,15 @@ brew install --cask openclaw-launcher
 xattr -cr /Applications/OpenClawLauncher.app
 ```
 
-### Option 2: Manual Download
+### Option 2: One-liner (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/run.sh | bash
+```
+
+Requires: Docker, curl, python3, openssl
+
+### Option 3: Manual Download (macOS)
 
 1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
 2. **Open** the DMG and drag **OpenClawLauncher.app** to `/Applications`
@@ -112,17 +120,17 @@ User double-clicks OpenClawLauncher.app
 - **Docker guidance** with download link if Docker Desktop is not found
 - **OAuth + API key auth** on first run, or skip and configure later in browser
 
-## Install & Run
+## Shell Commands
 
-### Shell script (for devs)
+If you cloned the repo or used the one-liner:
 
 ```bash
-# Prerequisites: Docker Desktop running
-./run.sh           # Start
-./run.sh stop      # Stop
-./run.sh logs      # Follow logs
+./run.sh           # Start (or re-run)
+./run.sh stop      # Stop container
+./run.sh start     # Start stopped container
+./run.sh logs      # Follow container logs
 ./run.sh status    # Check if running
-./run.sh reset     # Nuke and start fresh
+./run.sh reset     # Delete everything and start fresh
 ```
 
 ---
