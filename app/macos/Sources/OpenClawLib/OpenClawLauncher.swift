@@ -1,5 +1,8 @@
 import SwiftUI
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "ai.openclaw.launcher", category: "Launcher")
 
 // MARK: - Process Shell Executor (real implementation)
 
@@ -82,6 +85,7 @@ public class OpenClawLauncher: ObservableObject {
     private let dockerRetryDelayNs: UInt64
     private let gatewayRetryCount: Int
     private let gatewayRetryDelayNs: UInt64
+    private let gatewayTimeoutSecs: TimeInterval
 
     private let stateDir: URL
     private var configDir: URL { stateDir.appendingPathComponent("config") }
@@ -98,7 +102,8 @@ public class OpenClawLauncher: ObservableObject {
         dockerRetryCount: Int = 45,
         dockerRetryDelayNs: UInt64 = 2_000_000_000,
         gatewayRetryCount: Int = 30,
-        gatewayRetryDelayNs: UInt64 = 1_000_000_000
+        gatewayRetryDelayNs: UInt64 = 1_000_000_000,
+        gatewayTimeoutSecs: TimeInterval = 5
     ) {
         self.shellExecutor = shell
         self.stateDir = stateDir ?? FileManager.default.homeDirectoryForCurrentUser
@@ -107,6 +112,7 @@ public class OpenClawLauncher: ObservableObject {
         self.dockerRetryDelayNs = dockerRetryDelayNs
         self.gatewayRetryCount = gatewayRetryCount
         self.gatewayRetryDelayNs = gatewayRetryDelayNs
+        self.gatewayTimeoutSecs = gatewayTimeoutSecs
     }
 
     deinit {
@@ -148,6 +154,7 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Public
 
     public func start() {
+        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted)")
         guard !hasStarted || state == .stopped || state == .error else { return }
         hasStarted = true
         steps = []
@@ -187,15 +194,24 @@ public class OpenClawLauncher: ObservableObject {
 
     /// Detect a running container from a previous app session and resume monitoring it.
     private func tryRecoverRunningContainer() async -> Bool {
+        logger.info("tryRecoverRunningContainer: checking...")
+
         // Check if docker is even available (quick test, don't install)
         guard let info = try? await shell("docker", "info"),
-              info.exitCode == 0 else { return false }
+              info.exitCode == 0 else {
+            logger.info("tryRecoverRunningContainer: docker not available")
+            return false
+        }
 
         // Check if our container is running
         guard let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}"),
-              !ps.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+              !ps.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.info("tryRecoverRunningContainer: container NOT running")
+            return false
+        }
 
         // Container is running — load config and resume
+        logger.info("tryRecoverRunningContainer: container IS running, recovering")
         migrateOldStateDir()
         if FileManager.default.fileExists(atPath: envFile.path) {
             if let content = try? String(contentsOf: envFile, encoding: .utf8) {
@@ -674,6 +690,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func runContainer() async throws {
+        logger.info("runContainer: starting...")
         guard gatewayToken != nil else {
             throw LauncherError.noToken
         }
@@ -681,11 +698,13 @@ public class OpenClawLauncher: ObservableObject {
         // Check if already running
         let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}")
         if let output = ps?.stdout, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            logger.info("runContainer: container already running, skipping")
             addStep(.done, "Container already running")
             return
         }
 
         // Remove stopped container if exists
+        logger.info("runContainer: removing old container...")
         _ = try? await shell("docker", "rm", "-f", containerName)
 
         addStep(.running, "Starting container (lockdown mode)...")
@@ -737,7 +756,9 @@ public class OpenClawLauncher: ObservableObject {
             "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"
         )
 
+        logger.info("runContainer: docker run exitCode=\(result.exitCode)")
         if result.exitCode != 0 {
+            logger.error("runContainer: FAILED - \(result.stderr.prefix(200))")
             throw LauncherError.runFailed(result.stderr)
         }
 
@@ -746,18 +767,30 @@ public class OpenClawLauncher: ObservableObject {
 
     private func waitForGateway() async throws {
         addStep(.running, "Waiting for Gateway to be ready...")
+        logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        for _ in 0..<gatewayRetryCount {
-            // Check first, then sleep (so we don't wait unnecessarily if already ready)
-            let check = try? await shell("curl", "-s", "--connect-timeout", "2", "http://localhost:\(port)/openclaw/")
-            if check?.exitCode == 0 {
+        for attempt in 1...gatewayRetryCount {
+            // Check if gateway UI is responding at /openclaw/
+            let result = try? await shell(
+                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                "--max-time", "5",
+                "http://localhost:\(port)/openclaw/"
+            )
+
+            if let result = result, result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "200" {
+                logger.info("waitForGateway: attempt \(attempt), HTTP 200 - SUCCESS")
                 addStep(.done, "Gateway is ready!")
                 return
+            } else {
+                let code = result?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) ?? "no response"
+                logger.info("waitForGateway: attempt \(attempt), HTTP \(code)")
             }
+
             try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
         }
 
         // Not fatal — might just be slow
+        logger.warning("waitForGateway: TIMEOUT after \(self.gatewayRetryCount) attempts")
         addStep(.warning, "Gateway is still starting. Try opening the browser anyway.")
     }
 
@@ -794,31 +827,26 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        do {
-            let url = URL(string: "http://localhost:\(port)/openclaw/api/status")!
-            let (data, response) = try await URLSession.shared.data(from: url)
+        // Check if gateway UI is responding at /openclaw/
+        let result = try? await shell(
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "--max-time", "5",
+            "http://localhost:\(port)/openclaw/"
+        )
 
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                await handleHealthCheckFailure()
-                return
-            }
+        let stdout = result?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stderr = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let exitCode = result?.exitCode ?? -1
 
-            let status = try JSONDecoder().decode(GatewayStatus.self, from: data)
+        logger.info("checkGatewayHealth: exitCode=\(exitCode), stdout='\(stdout)', stderr='\(stderr.prefix(100))'")
+
+        if exitCode == 0 && stdout == "200" {
             await MainActor.run {
                 gatewayHealthy = true
-                gatewayStatusData = status
                 healthCheckFailCount = 0
             }
-        } catch {
-            let check = try? await shell("curl", "-s", "--connect-timeout", "2", "http://localhost:\(port)/openclaw/")
-            if check?.exitCode == 0 {
-                await MainActor.run {
-                    gatewayHealthy = true
-                    healthCheckFailCount = 0
-                }
-            } else {
-                await handleHealthCheckFailure()
-            }
+        } else {
+            await handleHealthCheckFailure()
         }
     }
 
