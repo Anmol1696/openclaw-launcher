@@ -18,15 +18,30 @@ Native SwiftUI app handles everything silently in the background.
 
 ## Quick Start
 
+### Option 1: Homebrew (Recommended)
+
+```bash
+brew tap anmol1696/openclaw-launcher
+brew install --cask openclaw-launcher
+```
+
+### Option 2: Manual Download
+
 1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
 2. **Open** the DMG and drag **OpenClawLauncher.app** to `/Applications`
-3. **Double-click** OpenClawLauncher.app
-4. The app will install Docker Desktop for you if needed, pull the OpenClaw image, and launch the container
-5. Your browser opens automatically — paste the gateway token, sign in with your AI provider, and start chatting
+3. **First launch**: Right-click the app → **Open** → Click **Open** in the dialog
+   *(Required once because the app isn't notarized yet)*
+
+### Then...
+
+1. **Double-click** OpenClawLauncher.app
+2. If Docker Desktop isn't installed, the app will guide you to download it
+3. The app pulls the OpenClaw image and launches the container
+4. Your browser opens automatically — paste the gateway token, sign in with your AI provider, and start chatting
 
 That's it. Everything persists across restarts in `~/.openclaw-launcher/`.
 
-> **First launch?** The app handles Docker Desktop installation, image pulling, token generation, and auth setup. Just follow the on-screen progress bar.
+> **First launch?** The app handles image pulling, token generation, and auth setup. Just follow the on-screen progress bar.
 
 ---
 
@@ -86,7 +101,7 @@ User double-clicks OpenClawLauncher.app
 - **Dashboard** after launch with container status, health indicator, uptime timer
 - **Menu bar icon** with green/yellow/red status dot and quick actions
 - **Health checks** polling the gateway every 5 seconds
-- **Docker auto-install** if Docker Desktop is not found
+- **Docker guidance** with download link if Docker Desktop is not found
 - **OAuth + API key auth** on first run, or skip and configure later in browser
 
 ## Install & Run
@@ -183,7 +198,7 @@ Nothing to edit in files or Terminal. All in the browser.
 
 | Problem                  | Fix                                      |
 |--------------------------|------------------------------------------|
-| "Docker not found"       | Install Docker Desktop (or let the app do it) |
+| "Docker not found"       | Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
 | App shows spinner        | Docker Desktop might be starting (~30s)  |
 | Can't connect to UI      | `docker ps` — ensure port 18789 is free  |
 | Lost gateway token       | `cat ~/.openclaw-launcher/.env`          |
