@@ -33,9 +33,15 @@ public struct ShellResult {
     }
 }
 
+// MARK: - Shell Executor Protocol
+
+public protocol ShellExecutor: Sendable {
+    func run(_ args: [String]) async throws -> ShellResult
+}
+
 public enum LauncherError: LocalizedError {
     case dockerNotRunning
-    case dockerInstallFailed(String)
+    case dockerNotInstalled
     case pullFailed(String)
     case runFailed(String)
     case noToken
@@ -44,8 +50,8 @@ public enum LauncherError: LocalizedError {
         switch self {
         case .dockerNotRunning:
             return "Docker Desktop is not running. Please start it and try again."
-        case .dockerInstallFailed(let msg):
-            return "Failed to install Docker Desktop: \(msg)"
+        case .dockerNotInstalled:
+            return "Docker Desktop is required. Please install it and try again."
         case .pullFailed(let msg):
             return "Failed to pull Docker image: \(msg.prefix(200))"
         case .runFailed(let msg):
