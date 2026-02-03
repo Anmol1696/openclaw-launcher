@@ -96,8 +96,9 @@ echo "   ✅ .app bundle created"
 # Without DEVELOPER_ID: ad-hoc signing (local dev only, triggers Gatekeeper warnings)
 if [ -n "${DEVELOPER_ID:-}" ]; then
     echo "   Code signing with Developer ID..."
-    codesign --force --deep --sign "$DEVELOPER_ID" \
+    codesign --force --sign "$DEVELOPER_ID" \
         --options runtime \
+        --timestamp \
         --entitlements "$SCRIPT_DIR/OpenClawLauncher.entitlements" \
         "$APP_DIR"
     echo "   ✅ Signed with Developer ID"
@@ -138,7 +139,8 @@ if command -v hdiutil &>/dev/null; then
         echo "   Notarizing with Apple..."
         xcrun notarytool submit "$DMG_PATH" \
             --keychain-profile "AC_PASSWORD" \
-            --wait
+            --wait \
+            --timeout 60m
         echo "   Stapling notarization ticket..."
         xcrun stapler staple "$DMG_PATH"
         echo "   ✅ Notarized and stapled"
