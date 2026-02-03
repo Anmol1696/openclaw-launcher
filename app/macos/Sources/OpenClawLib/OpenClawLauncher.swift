@@ -748,12 +748,13 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Waiting for Gateway to be ready...")
 
         for _ in 0..<gatewayRetryCount {
-            try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
+            // Check first, then sleep (so we don't wait unnecessarily if already ready)
             let check = try? await shell("curl", "-s", "--connect-timeout", "2", "http://localhost:\(port)/openclaw/")
             if check?.exitCode == 0 {
                 addStep(.done, "Gateway is ready!")
                 return
             }
+            try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
         }
 
         // Not fatal — might just be slow
