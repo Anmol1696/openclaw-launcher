@@ -18,19 +18,27 @@ Native SwiftUI app handles everything silently in the background.
 
 ## Quick Start
 
-### Option 1: Homebrew (Recommended)
+### Option 1: Homebrew
 
 ```bash
 brew tap anmol1696/openclaw-launcher
 brew install --cask openclaw-launcher
+
+# Beta only: bypass Gatekeeper (not needed after v1)
+xattr -cr /Applications/OpenClawLauncher.app
 ```
 
 ### Option 2: Manual Download
 
-1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
 2. **Open** the DMG and drag **OpenClawLauncher.app** to `/Applications`
-3. **First launch**: Right-click the app → **Open** → Click **Open** in the dialog
-   *(Required once because the app isn't notarized yet)*
+3. **First launch** — run this once in Terminal to bypass Gatekeeper:
+   ```bash
+   xattr -cr /Applications/OpenClawLauncher.app
+   ```
+   Then double-click the app normally.
+
+> **Note:** This is a beta release. Proper code signing is coming with v1 launch, after which no Terminal commands will be needed.
 
 ### Then...
 
