@@ -769,21 +769,22 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Waiting for Gateway to be ready...")
         logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        for attempt in 1...gatewayRetryCount {
-            // Check if gateway UI is responding at /openclaw/
-            let result = try? await shell(
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "5",
-                "http://localhost:\(port)/openclaw/"
-            )
+        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5  // 5 second timeout per attempt
 
-            if let result = result, result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "200" {
-                logger.info("waitForGateway: attempt \(attempt), HTTP 200 - SUCCESS")
-                addStep(.done, "Gateway is ready!")
-                return
-            } else {
-                let code = result?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) ?? "no response"
-                logger.info("waitForGateway: attempt \(attempt), HTTP \(code)")
+        for attempt in 1...gatewayRetryCount {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse {
+                    logger.info("waitForGateway: attempt \(attempt), HTTP \(http.statusCode)")
+                    if http.statusCode == 200 {
+                        addStep(.done, "Gateway is ready!")
+                        return
+                    }
+                }
+            } catch {
+                logger.info("waitForGateway: attempt \(attempt), error: \(error.localizedDescription)")
             }
 
             try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
@@ -827,27 +828,24 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        // Check if gateway UI is responding at /openclaw/
-        let result = try? await shell(
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-            "--max-time", "5",
-            "http://localhost:\(port)/openclaw/"
-        )
+        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
 
-        let stdout = result?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let exitCode = result?.exitCode ?? -1
-
-        logger.info("checkGatewayHealth: exitCode=\(exitCode), stdout='\(stdout)', stderr='\(stderr.prefix(100))'")
-
-        if exitCode == 0 && stdout == "200" {
-            await MainActor.run {
-                gatewayHealthy = true
-                healthCheckFailCount = 0
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                await MainActor.run {
+                    gatewayHealthy = true
+                    healthCheckFailCount = 0
+                }
+                return
             }
-        } else {
-            await handleHealthCheckFailure()
+        } catch {
+            logger.info("checkGatewayHealth: error: \(error.localizedDescription)")
         }
+
+        await handleHealthCheckFailure()
     }
 
     @MainActor private func handleHealthCheckFailure() async {

@@ -135,7 +135,6 @@ final class LauncherIntegrationTests: XCTestCase {
         mock.on({ $0.contains("ps") }, return: MockShellExecutor.ok(stdout: ""))
         mock.on({ $0.contains("rm") }, return: MockShellExecutor.ok)
         mock.on({ $0.contains("run") && $0.contains("-d") }, return: MockShellExecutor.ok)
-        mock.on("curl", return: MockShellExecutor.ok)
         mock.defaultResult = MockShellExecutor.ok
 
         let launcher = makeLauncher(mock: mock)
@@ -184,7 +183,6 @@ final class LauncherIntegrationTests: XCTestCase {
         mock.on({ $0.contains("info") }, return: MockShellExecutor.ok)
         mock.on({ $0.contains("pull") }, return: MockShellExecutor.ok)
         mock.on({ $0.contains("ps") }, return: MockShellExecutor.ok(stdout: "openclaw\n"))
-        mock.on("curl", return: MockShellExecutor.ok)
         mock.defaultResult = MockShellExecutor.ok
 
         let launcher = makeLauncher(mock: mock)
