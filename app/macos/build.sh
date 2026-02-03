@@ -90,11 +90,22 @@ PLIST
 echo "   ✅ .app bundle created"
 
 # ──────────────────────────────────────────────
-# 3. Ad-hoc code sign (prevents macOS "damaged" error)
+# 3. Code signing
 # ──────────────────────────────────────────────
-echo "   Code signing (ad-hoc)..."
-codesign --force --deep --sign - "$APP_DIR"
-echo "   ✅ Signed"
+# DEVELOPER_ID: Set to sign with Developer ID (e.g., "Developer ID Application: Name (TEAMID)")
+# Without DEVELOPER_ID: ad-hoc signing (local dev only, triggers Gatekeeper warnings)
+if [ -n "${DEVELOPER_ID:-}" ]; then
+    echo "   Code signing with Developer ID..."
+    codesign --force --deep --sign "$DEVELOPER_ID" \
+        --options runtime \
+        --entitlements "$SCRIPT_DIR/OpenClawLauncher.entitlements" \
+        "$APP_DIR"
+    echo "   ✅ Signed with Developer ID"
+else
+    echo "   Code signing (ad-hoc)..."
+    codesign --force --deep --sign - "$APP_DIR"
+    echo "   ✅ Signed (ad-hoc — will trigger Gatekeeper warning)"
+fi
 
 # ──────────────────────────────────────────────
 # 4. Create .dmg
@@ -117,6 +128,21 @@ if command -v hdiutil &>/dev/null; then
 
     rm -rf "$DMG_STAGING"
     [ -f "$DMG_PATH" ] && echo "   ✅ DMG created"
+
+    # ──────────────────────────────────────────────
+    # 5. Notarization (optional)
+    # ──────────────────────────────────────────────
+    # NOTARIZE: Set to "1" to notarize with Apple
+    # Requires: xcrun notarytool store-credentials "AC_PASSWORD" first
+    if [ -n "${NOTARIZE:-}" ] && [ "$NOTARIZE" = "1" ]; then
+        echo "   Notarizing with Apple..."
+        xcrun notarytool submit "$DMG_PATH" \
+            --keychain-profile "AC_PASSWORD" \
+            --wait
+        echo "   Stapling notarization ticket..."
+        xcrun stapler staple "$DMG_PATH"
+        echo "   ✅ Notarized and stapled"
+    fi
 fi
 
 echo ""
