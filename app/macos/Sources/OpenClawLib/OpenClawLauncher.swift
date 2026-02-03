@@ -102,7 +102,7 @@ public class OpenClawLauncher: ObservableObject {
         dockerRetryCount: Int = 45,
         dockerRetryDelayNs: UInt64 = 2_000_000_000,
         gatewayRetryCount: Int = 30,
-        gatewayRetryDelayNs: UInt64 = 1_000_000_000,
+        gatewayRetryDelayNs: UInt64 = 2_000_000_000,  // 2 seconds between retries
         gatewayTimeoutSecs: TimeInterval = 5
     ) {
         self.shellExecutor = shell
