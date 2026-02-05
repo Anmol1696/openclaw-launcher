@@ -67,6 +67,7 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var showResetConfirm: Bool = false
     @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
+    @Published public var selectedProvider: AuthProvider?
 
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
@@ -269,17 +270,74 @@ public class OpenClawLauncher: ObservableObject {
         }
     }
 
+    // MARK: - Provider Selection
+
+    public func selectProvider(_ provider: AuthProvider) {
+        selectedProvider = provider
+        apiKeyInput = ""
+
+        if provider.supportsOAuth {
+            // Show choice between OAuth and API key for Anthropic
+            state = .selectingProvider
+        } else {
+            // Go directly to API key input for OpenAI/Google
+            state = .waitingForApiKey
+        }
+    }
+
+    public func startOAuthForProvider() {
+        guard selectedProvider == .anthropic else { return }
+        do {
+            let pkce = try AnthropicOAuth.generatePKCE()
+            currentPKCE = pkce
+            let url = AnthropicOAuth.buildAuthorizeURL(pkce: pkce)
+            NSWorkspace.shared.open(url)
+            oauthCodeInput = ""
+            state = .waitingForOAuthCode
+            addStep(.running, "Opened browser for Anthropic sign-in")
+        } catch {
+            addStep(.error, "Failed to start OAuth: \(error.localizedDescription)")
+        }
+    }
+
+    public func showApiKeyInputForProvider() {
+        apiKeyInput = ""
+        state = .waitingForApiKey
+    }
+
     public func submitApiKey() {
+        guard let provider = selectedProvider else {
+            addStep(.error, "No provider selected")
+            state = .needsAuth
+            return
+        }
+
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty {
             let authDir = configDir.appendingPathComponent("agents/default/agent")
             let authFile = authDir.appendingPathComponent("auth-profiles.json")
+
+            // Build profile key based on provider
+            let profileKey: String
+            let providerName: String
+            switch provider {
+            case .anthropic:
+                profileKey = "anthropic:default"
+                providerName = "anthropic"
+            case .openai:
+                profileKey = "openai:default"
+                providerName = "openai"
+            case .google:
+                profileKey = "google:default"
+                providerName = "google"
+            }
+
             let payload: [String: Any] = [
                 "version": 1,
                 "profiles": [
-                    "anthropic:default": [
+                    profileKey: [
                         "type": "api_key",
-                        "provider": "anthropic",
+                        "provider": providerName,
                         "key": key
                     ]
                 ]
@@ -287,7 +345,7 @@ public class OpenClawLauncher: ObservableObject {
             if let data = try? JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted),
                let _ = try? data.write(to: authFile) {
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
-                addStep(.done, "API key saved")
+                addStep(.done, "\(provider.displayName) API key saved")
             } else {
                 addStep(.error, "Failed to save API key")
             }
@@ -295,6 +353,7 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.warning, "Skipped API key — set up later in Control UI")
         }
 
+        selectedProvider = nil
         state = .working
         Task {
             do {
@@ -306,34 +365,30 @@ public class OpenClawLauncher: ObservableObject {
         }
     }
 
-    public func startOAuth() {
-        do {
-            let pkce = try AnthropicOAuth.generatePKCE()
-            currentPKCE = pkce
-            let url = AnthropicOAuth.buildAuthorizeURL(pkce: pkce)
-            NSWorkspace.shared.open(url)
-            showApiKeyField = false
-            oauthCodeInput = ""
-            state = .waitingForOAuthCode
-            addStep(.running, "Opened browser for Anthropic sign-in")
-        } catch {
-            addStep(.error, "Failed to start OAuth: \(error.localizedDescription)")
-        }
-    }
-
-    public func showApiKeyInput() {
-        showApiKeyField = true
-        apiKeyInput = ""
-        state = .waitingForOAuthCode
+    public func backToProviderSelection() {
+        state = .needsAuth
+        selectedProvider = nil
     }
 
     public func skipAuth() {
         addStep(.warning, "Skipped auth — set up later in Control UI")
+        selectedProvider = nil
         state = .working
         Task {
             do { try await continueAfterSetup() }
             catch { addStep(.error, error.localizedDescription); state = .error }
         }
+    }
+
+    // Legacy method for backward compatibility
+    public func startOAuth() {
+        selectedProvider = .anthropic
+        startOAuthForProvider()
+    }
+
+    public func showApiKeyInput() {
+        selectedProvider = .anthropic
+        showApiKeyInputForProvider()
     }
 
     public func exchangeOAuthCode() {

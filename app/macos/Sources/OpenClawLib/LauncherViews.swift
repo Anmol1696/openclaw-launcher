@@ -339,13 +339,13 @@ struct SetupView: View {
             // Bottom actions
             VStack(spacing: 12) {
                 if launcher.state == .needsAuth {
-                    AuthChoiceView(launcher: launcher)
+                    ProviderSelectionView(launcher: launcher)
+                } else if launcher.state == .selectingProvider {
+                    AuthMethodView(launcher: launcher)
+                } else if launcher.state == .waitingForApiKey {
+                    ApiKeyInputView(launcher: launcher)
                 } else if launcher.state == .waitingForOAuthCode {
-                    if launcher.showApiKeyField {
-                        ApiKeyInputView(launcher: launcher)
-                    } else {
-                        OAuthCodeInputView(launcher: launcher)
-                    }
+                    OAuthCodeInputView(launcher: launcher)
                 } else if launcher.state == .stopped {
                     Button("Start OpenClaw") {
                         launcher.start()
@@ -380,64 +380,138 @@ struct SetupView: View {
     }
 }
 
-struct AuthChoiceView: View {
+// MARK: - Provider Selection View
+
+struct ProviderSelectionView: View {
     @ObservedObject var launcher: OpenClawLauncher
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Authentication")
+        VStack(spacing: 16) {
+            Text("Connect AI Model")
                 .font(.system(size: 14, weight: .semibold))
-            Text("Choose how to connect to Anthropic.")
+            Text("Choose your AI provider to get started.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 8) {
-                Button("Sign in with Claude") {
-                    launcher.startOAuth()
+                ForEach(AuthProvider.allCases) { provider in
+                    Button(action: { launcher.selectProvider(provider) }) {
+                        HStack {
+                            Text(provider.displayName)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
 
-                Button("Use API Key") {
-                    launcher.showApiKeyInput()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-
-                Button("Skip") {
+                Button("Skip for now") {
                     launcher.skipAuth()
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .font(.system(size: 12))
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: 300)
+
+            Text("You can always change this in the Control UI later.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+// MARK: - Auth Method View (OAuth vs API Key for providers that support both)
+
+struct AuthMethodView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let provider = launcher.selectedProvider {
+                Text(provider.displayName)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(provider.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 8) {
+                    if provider.supportsOAuth {
+                        Button("Sign in with Claude") {
+                            launcher.startOAuthForProvider()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Button("Use API Key") {
+                            launcher.showApiKeyInputForProvider()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    } else {
+                        Button("Use API Key") {
+                            launcher.showApiKeyInputForProvider()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+
+                    Button("Back") {
+                        launcher.backToProviderSelection()
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                }
             }
         }
     }
 }
+
+// MARK: - API Key Input View
 
 struct ApiKeyInputView: View {
     @ObservedObject var launcher: OpenClawLauncher
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("API Key Setup")
-                .font(.system(size: 14, weight: .semibold))
-            Text("Enter your Anthropic API key.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            SecureField("sk-ant-...", text: $launcher.apiKeyInput)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
-                .frame(maxWidth: 360)
-            HStack(spacing: 12) {
-                Button("Continue") { launcher.submitApiKey() }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                Button("Back") { launcher.state = .needsAuth }
-                    .buttonStyle(.bordered).controlSize(.large)
+            if let provider = launcher.selectedProvider {
+                Text("\(provider.displayName) API Key")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Enter your \(provider.rawValue) API key.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                SecureField(provider.apiKeyPlaceholder, text: $launcher.apiKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: 360)
+                HStack(spacing: 12) {
+                    Button("Continue") { launcher.submitApiKey() }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                    Button("Back") {
+                        if launcher.selectedProvider?.supportsOAuth == true {
+                            launcher.state = .selectingProvider
+                        } else {
+                            launcher.backToProviderSelection()
+                        }
+                    }
+                        .buttonStyle(.bordered).controlSize(.large)
+                }
             }
         }
     }
 }
+
+// MARK: - OAuth Code Input View
 
 struct OAuthCodeInputView: View {
     @ObservedObject var launcher: OpenClawLauncher
@@ -458,7 +532,7 @@ struct OAuthCodeInputView: View {
                 Button("Exchange") { launcher.exchangeOAuthCode() }
                     .buttonStyle(.borderedProminent).controlSize(.large)
                     .disabled(launcher.oauthCodeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Back") { launcher.state = .needsAuth }
+                Button("Back") { launcher.state = .selectingProvider }
                     .buttonStyle(.bordered).controlSize(.large)
             }
         }
