@@ -67,6 +67,7 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var showResetConfirm: Bool = false
     @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
+    @Published public var settings: LauncherSettings
 
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
@@ -75,8 +76,6 @@ public class OpenClawLauncher: ObservableObject {
     private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
-    private let imageName = "ghcr.io/openclaw/openclaw:latest"
-    private let port: Int = 18789
     private var hasStarted = false
     private let shellExecutor: ShellExecutor
 
@@ -103,7 +102,8 @@ public class OpenClawLauncher: ObservableObject {
         dockerRetryDelayNs: UInt64 = 2_000_000_000,
         gatewayRetryCount: Int = 30,
         gatewayRetryDelayNs: UInt64 = 2_000_000_000,  // 2 seconds between retries
-        gatewayTimeoutSecs: TimeInterval = 5
+        gatewayTimeoutSecs: TimeInterval = 5,
+        settings: LauncherSettings? = nil
     ) {
         self.shellExecutor = shell
         self.stateDir = stateDir ?? FileManager.default.homeDirectoryForCurrentUser
@@ -113,6 +113,7 @@ public class OpenClawLauncher: ObservableObject {
         self.gatewayRetryCount = gatewayRetryCount
         self.gatewayRetryDelayNs = gatewayRetryDelayNs
         self.gatewayTimeoutSecs = gatewayTimeoutSecs
+        self.settings = settings ?? LauncherSettings.load()
     }
 
     deinit {
@@ -419,7 +420,7 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.done, "Opened Control UI in browser")
             return
         }
-        var urlString = "http://localhost:\(port)/openclaw"
+        var urlString = "http://localhost:\(settings.port)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
         }
@@ -443,6 +444,17 @@ public class OpenClawLauncher: ObservableObject {
         steps.append(LaunchStep(status: status, message: message))
         if steps.count > 50 {
             steps.removeFirst(steps.count - 50)
+        }
+    }
+
+    // MARK: - Settings
+
+    public func updateSettings(_ newSettings: LauncherSettings) {
+        settings = newSettings
+        do {
+            try settings.save()
+        } catch {
+            addStep(.warning, "Failed to save settings: \(error.localizedDescription)")
         }
     }
 
@@ -626,7 +638,7 @@ public class OpenClawLauncher: ObservableObject {
         gatewayToken = token
 
         // Write .env
-        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
+        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(settings.port)\n"
         try envContent.write(to: envFile, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envFile.path)
 
@@ -671,7 +683,7 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Pulling latest image... this may take a moment")
         pullProgressText = nil
 
-        let pull = try await shell("docker", "pull", imageName)
+        let pull = try await shell("docker", "pull", settings.dockerImage)
         pullProgressText = nil
 
         if pull.exitCode == 0 {
@@ -680,7 +692,7 @@ public class OpenClawLauncher: ObservableObject {
         }
 
         // Pull failed — check if we have a local copy to fall back on
-        let inspect = try? await shell("docker", "image", "inspect", imageName)
+        let inspect = try? await shell("docker", "image", "inspect", settings.dockerImage)
         if inspect?.exitCode == 0 {
             addStep(.warning, "Couldn't check for updates (offline?). Using cached image.")
             return
@@ -723,9 +735,9 @@ public class OpenClawLauncher: ObservableObject {
             "--tmpfs", "/home/node/.npm:rw,size=64m",      // npm might need this
 
             // --- Resource limits ---
-            "--memory", "2g",                           // max 2GB RAM
-            "--memory-swap", "2g",                      // no swap
-            "--cpus", "2.0",                            // max 2 CPU cores
+            "--memory", settings.memoryLimit,          // max RAM
+            "--memory-swap", settings.memoryLimit,     // no swap
+            "--cpus", String(settings.cpuLimit),       // max CPU cores
             "--pids-limit", "256",                      // prevent fork bombs
 
             // --- Security ---
@@ -734,7 +746,7 @@ public class OpenClawLauncher: ObservableObject {
             "--security-opt", "no-new-privileges:true", // prevent privilege escalation
 
             // --- Network ---
-            "-p", "127.0.0.1:\(port):18789",           // LOCALHOST ONLY — not exposed to network
+            "-p", "127.0.0.1:\(settings.port):18789",           // LOCALHOST ONLY — not exposed to network
 
             // --- Persistent state (mounted writable) ---
             "-v", "\(configDir.path):/home/node/.openclaw",
@@ -750,7 +762,7 @@ public class OpenClawLauncher: ObservableObject {
             "--restart", "unless-stopped",
 
             // --- Image ---
-            imageName,
+            settings.dockerImage,
 
             // --- CMD override (upstream default is just `node dist/index.js`) ---
             "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"
@@ -769,7 +781,7 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Waiting for Gateway to be ready...")
         logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(settings.port)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5  // 5 second timeout per attempt
 
@@ -828,7 +840,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(settings.port)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
 

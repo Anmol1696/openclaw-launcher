@@ -79,6 +79,58 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(agents["defaults"])
     }
 
+    // MARK: - LauncherSettings Tests
+
+    func testSettingsDefaults() {
+        let settings = LauncherSettings()
+        XCTAssertEqual(settings.healthCheckInterval, 5.0)
+        XCTAssertEqual(settings.openBrowserOnStart, true)
+        XCTAssertEqual(settings.dockerImage, "ghcr.io/openclaw/openclaw:latest")
+        XCTAssertEqual(settings.memoryLimit, "2g")
+        XCTAssertEqual(settings.cpuLimit, 2.0)
+        XCTAssertEqual(settings.port, 18789)
+    }
+
+    func testSettingsEncodeDecode() throws {
+        let settings = LauncherSettings(
+            healthCheckInterval: 10.0,
+            openBrowserOnStart: false,
+            dockerImage: "custom/image:v1",
+            memoryLimit: "4g",
+            cpuLimit: 4.0,
+            port: 19000
+        )
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(settings)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(LauncherSettings.self, from: data)
+
+        XCTAssertEqual(settings, decoded)
+    }
+
+    func testSettingsSaveLoad() throws {
+        // Create custom settings
+        var settings = LauncherSettings()
+        settings.port = 12345
+        settings.memoryLimit = "8g"
+
+        // Save to temp file
+        let settingsFile = tempDir.appendingPathComponent("settings.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(settings)
+        try data.write(to: settingsFile)
+
+        // Load back
+        let loadedData = try Data(contentsOf: settingsFile)
+        let loaded = try JSONDecoder().decode(LauncherSettings.self, from: loadedData)
+
+        XCTAssertEqual(loaded.port, 12345)
+        XCTAssertEqual(loaded.memoryLimit, "8g")
+    }
+
     func testMigration() throws {
         let oldDir = tempDir.appendingPathComponent("old-state")
         let newDir = tempDir.appendingPathComponent("new-state")
