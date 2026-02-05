@@ -18,7 +18,16 @@ public enum AnthropicOAuth {
     public static let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private static let authorizeURL = URL(string: "https://claude.ai/oauth/authorize")!
     private static let tokenURL = URL(string: "https://console.anthropic.com/v1/oauth/token")!
-    private static let redirectURI = "https://console.anthropic.com/oauth/code/callback"
+
+    // Standard redirect URI (requires manual code copy)
+    private static let webRedirectURI = "https://console.anthropic.com/oauth/code/callback"
+
+    // Custom URL scheme for automatic callback (requires Anthropic to accept it)
+    public static let customRedirectURI = "openclaw://oauth/callback"
+
+    // Use web redirect by default until we verify Anthropic accepts custom schemes
+    private static var redirectURI: String { webRedirectURI }
+
     private static let scopes = "org:create_api_key user:profile user:inference"
 
     public struct PKCE {

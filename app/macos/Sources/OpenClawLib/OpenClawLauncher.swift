@@ -391,6 +391,37 @@ public class OpenClawLauncher: ObservableObject {
         showApiKeyInputForProvider()
     }
 
+    /// Handle OAuth callback from custom URL scheme (openclaw://oauth/callback)
+    public func handleOAuthCallback(code: String, state: String?) {
+        guard let pkce = currentPKCE else {
+            addStep(.error, "No PKCE session. Try signing in again.")
+            state.map { _ in } // Silence unused warning
+            self.state = .needsAuth
+            return
+        }
+
+        // Optionally verify state matches our PKCE verifier
+        if let receivedState = state, receivedState != pkce.verifier {
+            addStep(.warning, "OAuth state mismatch — proceeding anyway")
+        }
+
+        print("[OpenClaw] Received OAuth callback with code: \(code.prefix(8))...")
+        addStep(.running, "Processing OAuth callback...")
+        self.state = .working
+
+        Task {
+            do {
+                let creds = try await AnthropicOAuth.exchangeCode(code: code, verifier: pkce.verifier)
+                try saveOAuthCredentials(creds)
+                addStep(.done, "Signed in with Claude")
+                try await continueAfterSetup()
+            } catch {
+                addStep(.error, "OAuth exchange failed: \(error.localizedDescription)")
+                self.state = .needsAuth
+            }
+        }
+    }
+
     public func exchangeOAuthCode() {
         guard let pkce = currentPKCE else {
             addStep(.error, "No PKCE session. Try signing in again.")
