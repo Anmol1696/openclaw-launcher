@@ -22,7 +22,7 @@ struct OpenClawApp: App {
                 .frame(width: 500, height: 400)
             } else {
                 NewLauncherView(launcher: launcher, settings: settings)
-                    .frame(width: 650, height: launcher.state == .running ? 480 : 420)
+                    .frame(width: 700, height: launcher.state == .running ? 520 : 480)
                     .animation(.easeInOut(duration: 0.3), value: launcher.state)
             }
         }
@@ -31,7 +31,11 @@ struct OpenClawApp: App {
 
         // Settings Window
         Window("Settings", id: "settings") {
-            SettingsView(settings: settings)
+            SettingsView(
+                settings: settings,
+                onReAuthenticate: { launcher.reAuthenticate() },
+                onResetAll: { launcher.resetEverything() }
+            )
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

@@ -7,14 +7,23 @@ public struct SettingsView: View {
 
     @State private var selectedTab: SettingsTab = .general
 
+    var onReAuthenticate: (() -> Void)?
+    var onResetAll: (() -> Void)?
+
     public enum SettingsTab: String, CaseIterable {
         case general = "General"
         case container = "Container"
         case advanced = "Advanced"
     }
 
-    public init(settings: LauncherSettings) {
+    public init(
+        settings: LauncherSettings,
+        onReAuthenticate: (() -> Void)? = nil,
+        onResetAll: (() -> Void)? = nil
+    ) {
         self.settings = settings
+        self.onReAuthenticate = onReAuthenticate
+        self.onResetAll = onResetAll
     }
 
     public var body: some View {
@@ -70,7 +79,11 @@ public struct SettingsView: View {
                     case .container:
                         SettingsContainerTab(settings: settings)
                     case .advanced:
-                        SettingsAdvancedTab(settings: settings)
+                        SettingsAdvancedTab(
+                            settings: settings,
+                            onReAuthenticate: onReAuthenticate,
+                            onResetAll: onResetAll
+                        )
                     }
                 }
                 .padding(20)
@@ -87,6 +100,7 @@ public struct SettingsView: View {
         .onChange(of: settings.networkIsolation) { _, _ in settings.save() }
         .onChange(of: settings.filesystemIsolation) { _, _ in settings.save() }
         .onChange(of: settings.healthCheckInterval) { _, _ in settings.save() }
+        .onChange(of: settings.useRandomPort) { _, _ in settings.save() }
         .onChange(of: settings.customPort) { _, _ in settings.save() }
         .onChange(of: settings.debugMode) { _, _ in settings.save() }
     }

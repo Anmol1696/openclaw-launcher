@@ -36,6 +36,7 @@ public struct NewLauncherView: View {
                 // Main Content Area
                 MainContentView(
                     launcher: launcher,
+                    settings: settings,
                     stepInfos: stepInfos,
                     progress: progress,
                     progressLeftText: progressLeftText,
@@ -61,7 +62,17 @@ public struct NewLauncherView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Ocean.bg)
         .sheet(isPresented: $showSettings) {
-            SettingsView(settings: settings)
+            SettingsView(
+                settings: settings,
+                onReAuthenticate: {
+                    showSettings = false
+                    launcher.reAuthenticate()
+                },
+                onResetAll: {
+                    showSettings = false
+                    launcher.resetEverything()
+                }
+            )
         }
     }
 
@@ -269,6 +280,7 @@ public struct NewLauncherView: View {
         case .idle, .stopped:
             return [
                 .init(title: "Launch", icon: "▶") {
+                    launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
                     launcher.start()
                 }
             ]
@@ -290,6 +302,7 @@ public struct NewLauncherView: View {
         case .error:
             return [
                 .init(title: "Retry", icon: "↻") {
+                    launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
                     launcher.start()
                 },
                 .init(title: "Dismiss", variant: .secondary) {
@@ -448,6 +461,7 @@ private struct SidebarButton: View {
 
 private struct MainContentView: View {
     @ObservedObject var launcher: OpenClawLauncher
+    @ObservedObject var settings: LauncherSettings
     let stepInfos: [StatusPanel.StepInfo]
     let progress: Double?
     let progressLeftText: String?
@@ -466,7 +480,10 @@ private struct MainContentView: View {
                 if launcher.state == .error {
                     ErrorStateView(
                         errorType: errorType,
-                        onRetry: { launcher.start() },
+                        onRetry: {
+                            launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+                            launcher.start()
+                        },
                         onSecondary: errorSecondaryAction,
                         onTertiary: errorTertiaryAction
                     )
@@ -498,7 +515,7 @@ private struct MainContentView: View {
                         InfoCard(rows: [
                             .init(
                                 label: "Gateway URL",
-                                value: "http://localhost:18789",
+                                value: "http://localhost:\(launcher.activePort)/openclaw",
                                 copyable: true
                             ),
                             .init(label: "Status", value: "", isConnected: launcher.gatewayHealthy),

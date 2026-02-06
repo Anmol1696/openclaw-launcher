@@ -18,6 +18,7 @@ public class LauncherSettings: ObservableObject, Codable {
 
     // MARK: - Advanced Settings
     @Published public var healthCheckInterval: Double = 5.0
+    @Published public var useRandomPort: Bool = false
     @Published public var customPort: Int = 18789
     @Published public var debugMode: Bool = false
 
@@ -61,7 +62,7 @@ public class LauncherSettings: ObservableObject, Codable {
         case hasCompletedOnboarding
         case launchAtStartup, showInMenuBar, checkForUpdates
         case memoryLimit, cpuLimit, networkIsolation, filesystemIsolation
-        case healthCheckInterval, customPort, debugMode
+        case healthCheckInterval, useRandomPort, customPort, debugMode
     }
 
     public init() {}
@@ -77,6 +78,7 @@ public class LauncherSettings: ObservableObject, Codable {
         networkIsolation = try container.decodeIfPresent(Bool.self, forKey: .networkIsolation) ?? true
         filesystemIsolation = try container.decodeIfPresent(Bool.self, forKey: .filesystemIsolation) ?? true
         healthCheckInterval = try container.decodeIfPresent(Double.self, forKey: .healthCheckInterval) ?? 5.0
+        useRandomPort = try container.decodeIfPresent(Bool.self, forKey: .useRandomPort) ?? false
         customPort = try container.decodeIfPresent(Int.self, forKey: .customPort) ?? 18789
         debugMode = try container.decodeIfPresent(Bool.self, forKey: .debugMode) ?? false
     }
@@ -92,6 +94,7 @@ public class LauncherSettings: ObservableObject, Codable {
         try container.encode(networkIsolation, forKey: .networkIsolation)
         try container.encode(filesystemIsolation, forKey: .filesystemIsolation)
         try container.encode(healthCheckInterval, forKey: .healthCheckInterval)
+        try container.encode(useRandomPort, forKey: .useRandomPort)
         try container.encode(customPort, forKey: .customPort)
         try container.encode(debugMode, forKey: .debugMode)
     }
@@ -132,6 +135,7 @@ public class LauncherSettings: ObservableObject, Codable {
         networkIsolation = true
         filesystemIsolation = true
         healthCheckInterval = 5.0
+        useRandomPort = false
         customPort = 18789
         debugMode = false
         save()

@@ -68,6 +68,7 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
     @Published public var lastError: LauncherError?
+    @Published public var activePort: Int = 18789  // The actual port being used (may be random)
 
     /// Guards against concurrent start/stop operations to prevent race conditions
     private var isOperationInProgress = false
@@ -79,7 +80,7 @@ public class OpenClawLauncher: ObservableObject {
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
-    private let port: Int = 18789
+    private let defaultPort: Int = 18789
     private var hasStarted = false
     private let shellExecutor: ShellExecutor
 
@@ -152,6 +153,53 @@ public class OpenClawLauncher: ObservableObject {
         let minutes = (elapsed % 3600) / 60
         let seconds = elapsed % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    // MARK: - Port Configuration
+
+    /// Configure the port based on settings. Call this before starting the container.
+    public func configurePort(useRandomPort: Bool, customPort: Int) {
+        if useRandomPort {
+            activePort = findAvailablePort()
+            logger.info("Using random port: \(self.activePort)")
+        } else {
+            activePort = customPort
+            logger.info("Using custom port: \(self.activePort)")
+        }
+    }
+
+    /// Find an available port in the ephemeral range (49152-65535)
+    private func findAvailablePort() -> Int {
+        // Try to find an available port by attempting to bind
+        for _ in 0..<100 {
+            let port = Int.random(in: 49152...65535)
+            if isPortAvailable(port) {
+                return port
+            }
+        }
+        // Fallback to default if we can't find one
+        logger.warning("Could not find available random port, using default")
+        return defaultPort
+    }
+
+    /// Check if a port is available by attempting to create a socket
+    private func isPortAvailable(_ port: Int) -> Bool {
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return false }
+        defer { close(socketFD) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port).bigEndian
+        addr.sin_addr.s_addr = INADDR_ANY
+
+        let bindResult = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        return bindResult == 0
     }
 
     // MARK: - Public
@@ -457,7 +505,7 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.done, "Opened Control UI in browser")
             return
         }
-        var urlString = "http://localhost:\(port)/openclaw"
+        var urlString = "http://localhost:\(activePort)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
         }
@@ -675,7 +723,7 @@ public class OpenClawLauncher: ObservableObject {
         gatewayToken = token
 
         // Write .env
-        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
+        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(activePort)\n"
         try envContent.write(to: envFile, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envFile.path)
 
@@ -783,7 +831,7 @@ public class OpenClawLauncher: ObservableObject {
             "--security-opt", "no-new-privileges:true", // prevent privilege escalation
 
             // --- Network ---
-            "-p", "127.0.0.1:\(port):18789",           // LOCALHOST ONLY — not exposed to network
+            "-p", "127.0.0.1:\(activePort):18789",    // LOCALHOST ONLY — not exposed to network
 
             // --- Persistent state (mounted writable) ---
             "-v", "\(configDir.path):/home/node/.openclaw",
@@ -818,7 +866,7 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Waiting for Gateway to be ready...")
         logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(activePort)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5  // 5 second timeout per attempt
 
@@ -877,7 +925,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(activePort)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
 
