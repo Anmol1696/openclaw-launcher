@@ -67,6 +67,7 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var showResetConfirm: Bool = false
     @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
+    @Published public var lastError: LauncherError?
 
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
@@ -159,6 +160,7 @@ public class OpenClawLauncher: ObservableObject {
         hasStarted = true
         steps = []
         needsDockerInstall = false
+        lastError = nil
         state = .working
         menuBarStatus = .starting
 
@@ -181,9 +183,13 @@ public class OpenClawLauncher: ObservableObject {
 
                 try await continueAfterSetup()
             } catch {
-                if let launcherError = error as? LauncherError,
-                   case .dockerNotInstalled = launcherError {
-                    needsDockerInstall = true
+                if let launcherError = error as? LauncherError {
+                    lastError = launcherError
+                    if case .dockerNotInstalled = launcherError {
+                        needsDockerInstall = true
+                    }
+                } else {
+                    lastError = nil
                 }
                 addStep(.error, error.localizedDescription)
                 state = .error
@@ -437,6 +443,17 @@ public class OpenClawLauncher: ObservableObject {
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(nil)
         addStep(.done, "Opened logs in Terminal")
+    }
+
+    public func openDockerDownload() {
+        guard !suppressSideEffects else { return }
+        let url = URL(string: "https://www.docker.com/products/docker-desktop/")!
+        NSWorkspace.shared.open(url)
+    }
+
+    public func openDockerApp() {
+        guard !suppressSideEffects else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
     }
 
     public func addStep(_ status: StepStatus, _ message: String) {
