@@ -2,6 +2,9 @@ import Foundation
 
 /// User-configurable settings for OpenClaw Launcher
 public class LauncherSettings: ObservableObject, Codable {
+    // MARK: - Onboarding
+    @Published public var hasCompletedOnboarding: Bool = false
+
     // MARK: - General Settings
     @Published public var launchAtStartup: Bool = false
     @Published public var showInMenuBar: Bool = true
@@ -55,6 +58,7 @@ public class LauncherSettings: ObservableObject, Codable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
+        case hasCompletedOnboarding
         case launchAtStartup, showInMenuBar, checkForUpdates
         case memoryLimit, cpuLimit, networkIsolation, filesystemIsolation
         case healthCheckInterval, customPort, debugMode
@@ -64,6 +68,7 @@ public class LauncherSettings: ObservableObject, Codable {
 
     public required init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         launchAtStartup = try container.decodeIfPresent(Bool.self, forKey: .launchAtStartup) ?? false
         showInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? true
         checkForUpdates = try container.decodeIfPresent(Bool.self, forKey: .checkForUpdates) ?? true
@@ -78,6 +83,7 @@ public class LauncherSettings: ObservableObject, Codable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
         try container.encode(launchAtStartup, forKey: .launchAtStartup)
         try container.encode(showInMenuBar, forKey: .showInMenuBar)
         try container.encode(checkForUpdates, forKey: .checkForUpdates)

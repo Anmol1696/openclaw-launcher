@@ -258,32 +258,32 @@
 **Branch:** `feat/ui-onboarding`
 
 #### 6.1 Onboarding Flow
-- [ ] `OnboardingView.swift`
-  - [ ] Step indicator dots
-  - [ ] Content area
-  - [ ] Navigation buttons
-- [ ] Step 1: Welcome
-  - [ ] 🐙 illustration
-  - [ ] Title + description
-  - [ ] "Get Started" button
-- [ ] Step 2: Docker Check
-  - [ ] 🐳 illustration
-  - [ ] Status checklist (installed, running, version)
-  - [ ] Continue/Back buttons
-- [ ] Step 2b: Docker Missing (conditional)
-  - [ ] Error styling
-  - [ ] Download Docker button
-  - [ ] Check Again button
-- [ ] Step 3: Complete
-  - [ ] ✓ illustration
-  - [ ] "You're All Set!"
-  - [ ] "Launch First Environment" button
-  - [ ] Keyboard shortcut hint
+- [x] `OnboardingView.swift`
+  - [x] Step indicator dots
+  - [x] Content area
+  - [x] Navigation buttons
+- [x] Step 1: Welcome
+  - [x] 🐙 illustration
+  - [x] Title + description
+  - [x] "Get Started" button
+- [x] Step 2: Docker Check
+  - [x] 🐳 illustration
+  - [x] Status checklist (installed, running, version)
+  - [x] Continue/Back buttons
+- [x] Step 2b: Docker Missing (conditional)
+  - [x] Error styling
+  - [x] Download Docker button
+  - [x] Check Again button
+- [x] Step 3: Complete
+  - [x] ✓ illustration
+  - [x] "You're All Set!"
+  - [x] "Launch First Environment" button
+  - [x] Keyboard shortcut hint
 
 #### 6.2 First-Run Detection
-- [ ] Add `hasCompletedOnboarding` to settings
-- [ ] Show onboarding on first launch
-- [ ] Skip if already completed
+- [x] Add `hasCompletedOnboarding` to settings
+- [x] Show onboarding on first launch
+- [x] Skip if already completed
 
 ---
 
@@ -332,7 +332,7 @@ Sources/OpenClawLib/
     ├── [x] MenuBarPopover.swift
     ├── [x] ConfirmStopModal.swift (in OceanModal.swift)
     ├── [x] ConfirmResetModal.swift (in OceanModal.swift)
-    └── [ ] OnboardingView.swift
+    └── [x] OnboardingView.swift
 ```
 
 Files to modify:
@@ -354,9 +354,9 @@ Files to modify:
 | 3. Error States | **Complete** | 9 | 8 |
 | 4. Settings | **Complete** | 14 | 14 |
 | 5. Supporting | **Complete** | 16 | 13 |
-| 6. Onboarding | Not Started | 10 | 0 |
+| 6. Onboarding | **Complete** | 10 | 10 |
 | 7. Cleanup | Not Started | 6 | 0 |
-| **Total** | | **100** | **74** |
+| **Total** | | **100** | **84** |
 
 ---
 

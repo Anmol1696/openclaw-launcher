@@ -4,12 +4,18 @@ import OpenClawLib
 @main
 struct OpenClawApp: App {
     @StateObject private var launcher = OpenClawLauncher()
-    @State private var settings = LauncherSettings.load()
+    @StateObject private var settings = LauncherSettings.load()
     @AppStorage("useNewUI") private var useNewUI = true  // Feature flag for new Ocean UI
 
     var body: some Scene {
         WindowGroup {
-            if useNewUI {
+            if !settings.hasCompletedOnboarding {
+                OnboardingView(settings: settings) {
+                    // Onboarding complete - launcher will auto-start if user clicked "Launch"
+                    launcher.start()
+                }
+                .frame(width: 500, height: 400)
+            } else if useNewUI {
                 NewLauncherView(launcher: launcher, settings: settings)
                     .frame(width: 650, height: launcher.state == .running ? 480 : 420)
                     .animation(.easeInOut(duration: 0.3), value: launcher.state)
