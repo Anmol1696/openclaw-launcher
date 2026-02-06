@@ -69,6 +69,8 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var authExpiredBanner: String?
     @Published public var lastError: LauncherError?
 
+    /// Guards against concurrent start/stop operations to prevent race conditions
+    private var isOperationInProgress = false
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
     private var healthCheckTimer: Timer?
@@ -155,8 +157,16 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Public
 
     public func start() {
-        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted)")
+        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted), inProgress=\(self.isOperationInProgress)")
+
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("start() called while operation in progress, ignoring")
+            return
+        }
         guard !hasStarted || state == .stopped || state == .error else { return }
+
+        isOperationInProgress = true
         hasStarted = true
         steps = []
         needsDockerInstall = false
@@ -165,6 +175,8 @@ public class OpenClawLauncher: ObservableObject {
         menuBarStatus = .starting
 
         Task {
+            defer { self.isOperationInProgress = false }
+
             do {
                 // Quick check: is the container already running from a previous session?
                 if await tryRecoverRunningContainer() { return }
@@ -238,7 +250,17 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func stopContainer() {
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("stopContainer() called while operation in progress, ignoring")
+            return
+        }
+
+        isOperationInProgress = true
+
         Task {
+            defer { self.isOperationInProgress = false }
+
             addStep(.running, "Stopping OpenClaw...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
@@ -246,11 +268,21 @@ public class OpenClawLauncher: ObservableObject {
             uptimeTick = 0
             state = .stopped
             menuBarStatus = .stopped
+            hasStarted = false  // Allow restart after stop
             stopHealthCheck()
         }
     }
 
     public func restartContainer() async {
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("restartContainer() called while operation in progress, ignoring")
+            return
+        }
+
+        isOperationInProgress = true
+        defer { isOperationInProgress = false }
+
         addStep(.running, "Restarting...")
         menuBarStatus = .starting
         gatewayHealthy = false

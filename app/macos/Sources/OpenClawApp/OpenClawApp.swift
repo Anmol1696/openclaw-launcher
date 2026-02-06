@@ -3,8 +3,14 @@ import OpenClawLib
 
 @main
 struct OpenClawApp: App {
-    @StateObject private var launcher = OpenClawLauncher()
-    @StateObject private var settings = LauncherSettings.load()
+    @StateObject private var launcher: OpenClawLauncher
+    @StateObject private var settings: LauncherSettings
+
+    init() {
+        // Proper StateObject initialization - load settings once at startup
+        _launcher = StateObject(wrappedValue: OpenClawLauncher())
+        _settings = StateObject(wrappedValue: LauncherSettings.load())
+    }
 
     var body: some Scene {
         WindowGroup {

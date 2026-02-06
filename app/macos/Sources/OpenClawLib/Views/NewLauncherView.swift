@@ -269,13 +269,13 @@ public struct NewLauncherView: View {
         case .idle, .stopped:
             return [
                 .init(title: "Launch", icon: "▶") {
-                    Task { await launcher.start() }
+                    launcher.start()
                 }
             ]
         case .working, .needsAuth, .waitingForOAuthCode:
             return [
                 .init(title: "Cancel", variant: .secondary) {
-                    Task { await launcher.stopContainer() }
+                    launcher.stopContainer()
                 }
             ]
         case .running:
@@ -284,13 +284,13 @@ public struct NewLauncherView: View {
                     launcher.openBrowser()
                 },
                 .init(title: "Stop", icon: "■", variant: .secondary) {
-                    Task { await launcher.stopContainer() }
+                    launcher.stopContainer()
                 }
             ]
         case .error:
             return [
                 .init(title: "Retry", icon: "↻") {
-                    Task { await launcher.start() }
+                    launcher.start()
                 },
                 .init(title: "Dismiss", variant: .secondary) {
                     launcher.state = .idle
@@ -466,7 +466,7 @@ private struct MainContentView: View {
                 if launcher.state == .error {
                     ErrorStateView(
                         errorType: errorType,
-                        onRetry: { Task { await launcher.start() } },
+                        onRetry: { launcher.start() },
                         onSecondary: errorSecondaryAction,
                         onTertiary: errorTertiaryAction
                     )
