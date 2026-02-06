@@ -470,6 +470,16 @@ private struct MainContentView: View {
                         onSecondary: errorSecondaryAction,
                         onTertiary: errorTertiaryAction
                     )
+                } else if launcher.state == .needsAuth {
+                    // Auth choice view
+                    OceanAuthChoiceView(launcher: launcher)
+                } else if launcher.state == .waitingForOAuthCode {
+                    // OAuth or API key input
+                    if launcher.showApiKeyField {
+                        OceanApiKeyInputView(launcher: launcher)
+                    } else {
+                        OceanOAuthCodeInputView(launcher: launcher)
+                    }
                 } else {
                     // Status Panel with steps
                     StatusPanel(

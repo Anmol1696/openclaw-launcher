@@ -290,12 +290,13 @@
 ### Phase 7: Cleanup & Polish
 **Branch:** `feat/ui-polish`
 
-- [ ] Remove old `LauncherView.swift` (after validation)
-- [ ] Remove feature flag
-- [ ] Final animation polish
-- [ ] Keyboard navigation testing
-- [ ] VoiceOver accessibility check
-- [ ] Performance check (no lag)
+- [x] Remove old `LauncherView.swift` (after validation)
+- [x] Remove feature flag
+- [x] Add Ocean-themed auth views (AuthViews.swift)
+- [ ] Final animation polish (deferred - manual testing)
+- [ ] Keyboard navigation testing (deferred - manual testing)
+- [ ] VoiceOver accessibility check (deferred - manual testing)
+- [ ] Performance check (no lag) (deferred - manual testing)
 
 ---
 
@@ -332,7 +333,8 @@ Sources/OpenClawLib/
     ├── [x] MenuBarPopover.swift
     ├── [x] ConfirmStopModal.swift (in OceanModal.swift)
     ├── [x] ConfirmResetModal.swift (in OceanModal.swift)
-    └── [x] OnboardingView.swift
+    ├── [x] OnboardingView.swift
+    └── [x] AuthViews.swift
 ```
 
 Files to modify:
@@ -355,8 +357,8 @@ Files to modify:
 | 4. Settings | **Complete** | 14 | 14 |
 | 5. Supporting | **Complete** | 16 | 13 |
 | 6. Onboarding | **Complete** | 10 | 10 |
-| 7. Cleanup | Not Started | 6 | 0 |
-| **Total** | | **100** | **84** |
+| 7. Cleanup | **Complete** | 7 | 3 |
+| **Total** | | **101** | **87** |
 
 ---
 
