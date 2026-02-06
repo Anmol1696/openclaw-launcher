@@ -169,7 +169,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     /// Find an available port in the ephemeral range (49152-65535)
-    private func findAvailablePort() -> Int {
+    public func findAvailablePort() -> Int {
         // Try to find an available port by attempting to bind
         for _ in 0..<100 {
             let port = Int.random(in: 49152...65535)
@@ -284,6 +284,11 @@ public class OpenClawLauncher: ObservableObject {
                 for line in content.split(separator: "\n") {
                     if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
                         gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+                    } else if line.hasPrefix("OPENCLAW_PORT=") {
+                        if let port = Int(line.dropFirst("OPENCLAW_PORT=".count)) {
+                            activePort = port
+                            logger.info("tryRecoverRunningContainer: recovered port \(port)")
+                        }
                     }
                 }
             }

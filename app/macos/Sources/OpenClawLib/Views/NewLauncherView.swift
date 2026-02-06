@@ -24,7 +24,8 @@ public struct NewLauncherView: View {
                     selectedNavItem: $selectedNavItem,
                     isRunning: launcher.state == .running,
                     onOpenBrowser: { launcher.openBrowser() },
-                    onViewLogs: { launcher.viewLogs() }
+                    onViewLogs: { launcher.viewLogs() },
+                    onReAuthenticate: { launcher.reAuthenticate() }
                 )
                 .frame(width: 160)
 
@@ -102,7 +103,8 @@ public struct NewLauncherView: View {
             return .pullFailed(details: details)
         case .runFailed(let details):
             if details.lowercased().contains("port") || details.lowercased().contains("bind") {
-                return .portConflict(port: 18789, suggestedPort: 18790)
+                let suggestedPort = launcher.findAvailablePort()
+                return .portConflict(port: launcher.activePort, suggestedPort: suggestedPort)
             }
             return .containerCrashed(exitCode: nil)
         case .noToken:
@@ -322,6 +324,7 @@ private struct SidebarView: View {
     let isRunning: Bool
     let onOpenBrowser: () -> Void
     let onViewLogs: () -> Void
+    let onReAuthenticate: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -382,6 +385,14 @@ private struct SidebarView: View {
                     }
                     SidebarButton(icon: "doc.text", title: "View Logs") {
                         onViewLogs()
+                    }
+
+                    Divider()
+                        .background(Ocean.border.opacity(0.3))
+                        .padding(.vertical, 4)
+
+                    SidebarButton(icon: "person.badge.key", title: "Re-auth") {
+                        onReAuthenticate()
                     }
                 }
                 .padding(.horizontal, 12)
