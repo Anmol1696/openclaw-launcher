@@ -31,10 +31,10 @@ public struct ProcessShellExecutor: ShellExecutor {
 
         try process.run()
 
-        let outData = try await Task.detached {
+        let outData = await Task.detached {
             stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         }.value
-        let errData = try await Task.detached {
+        let errData = await Task.detached {
             stderrPipe.fileHandleForReading.readDataToEndOfFile()
         }.value
 
