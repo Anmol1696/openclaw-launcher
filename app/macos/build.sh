@@ -83,6 +83,17 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>ai.openclaw.launcher</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>openclaw</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

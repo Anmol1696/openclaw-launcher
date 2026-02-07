@@ -2,9 +2,58 @@ import Foundation
 
 public enum StepStatus { case pending, running, done, error, warning }
 
-public enum LauncherState { case idle, working, needsAuth, waitingForOAuthCode, running, stopped, error }
+public enum LauncherState { case idle, working, needsAuth, selectingProvider, waitingForApiKey, waitingForOAuthCode, running, stopped, error }
 
 public enum MenuBarStatus { case starting, running, stopped }
+
+// MARK: - Auth Providers
+
+public enum AuthProvider: String, CaseIterable, Identifiable {
+    case anthropic = "Anthropic"
+    case openai = "OpenAI"
+    case google = "Google AI"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .anthropic: return "Claude (Anthropic)"
+        case .openai: return "GPT (OpenAI)"
+        case .google: return "Gemini (Google AI)"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .anthropic: return "Sign in with your Claude account or use an API key"
+        case .openai: return "Enter your OpenAI API key"
+        case .google: return "Enter your Google AI API key"
+        }
+    }
+
+    public var supportsOAuth: Bool {
+        switch self {
+        case .anthropic: return true
+        case .openai, .google: return false
+        }
+    }
+
+    public var apiKeyPrefix: String {
+        switch self {
+        case .anthropic: return "sk-ant-"
+        case .openai: return "sk-"
+        case .google: return ""  // Google AI keys don't have a standard prefix
+        }
+    }
+
+    public var apiKeyPlaceholder: String {
+        switch self {
+        case .anthropic: return "sk-ant-api..."
+        case .openai: return "sk-proj-..."
+        case .google: return "AIza..."
+        }
+    }
+}
 
 public struct GatewayStatus: Codable {
     public let uptime: Int?
