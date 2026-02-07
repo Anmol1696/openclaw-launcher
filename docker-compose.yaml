@@ -1,0 +1,78 @@
+# ============================================================================
+#  OpenClaw Launcher - Docker Compose
+#
+#  Usage:
+#    # First time setup - create config directory and generate token:
+#    mkdir -p ~/.openclaw-launcher/config ~/.openclaw-launcher/workspace
+#    echo "OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)" > ~/.openclaw-launcher/.env
+#    echo "OPENCLAW_PORT=18789" >> ~/.openclaw-launcher/.env
+#
+#    # Start:
+#    docker-compose up -d
+#
+#    # View logs:
+#    docker-compose logs -f
+#
+#    # Stop:
+#    docker-compose stop
+#
+#    # Remove and clean up:
+#    docker-compose down -v
+#
+#  Control UI: http://localhost:18789/openclaw
+# ============================================================================
+
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:latest
+    container_name: openclaw
+    restart: unless-stopped
+
+    # Security: Run in lockdown mode
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+    # Resource limits
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2.0
+    pids_limit: 256
+
+    # Writable tmpfs for runtime needs
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+      - /home/node/.npm:rw,size=64m
+
+    # Network: localhost only for security
+    ports:
+      - "127.0.0.1:${OPENCLAW_PORT:-18789}:18789"
+
+    # Persistent storage
+    volumes:
+      - ${OPENCLAW_CONFIG_DIR:-~/.openclaw-launcher/config}:/home/node/.openclaw
+      - ${OPENCLAW_WORKSPACE_DIR:-~/.openclaw-launcher/workspace}:/home/node/.openclaw/workspace
+
+    # Environment
+    env_file:
+      - ${OPENCLAW_ENV_FILE:-~/.openclaw-launcher/.env}
+    environment:
+      - HOME=/home/node
+      - TERM=xterm-256color
+      - NODE_ENV=production
+
+    # Command
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18789/openclaw/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
