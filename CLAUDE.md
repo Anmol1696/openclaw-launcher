@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-OpenClaw Desktop is a native macOS launcher for the OpenClaw AI Gateway. Users double-click the app, it pulls the upstream Docker image (`ghcr.io/openclaw/openclaw:latest`), runs it in lockdown mode, and opens the Control UI in the browser. No terminal interaction required.
+OpenClaw Desktop is a native macOS launcher for the OpenClaw AI Gateway. Users double-click the app, it pulls the Docker image (`ghcr.io/anmol1696/openclaw-launcher:base`), runs it in lockdown mode, and opens the Control UI in the browser. No terminal interaction required.
 
 ## Repository Structure
 
@@ -23,6 +23,7 @@ app/macos/              # Native SwiftUI macOS app
   Tests/OpenClawTests/  # Unit tests (config, error, oauth, token, UI state)
   build.sh              # Compiles Swift → .app bundle → .dmg
   scripts/              # Build helpers (icon generation)
+docker/                 # Dockerfiles for image flavors (base, lite, full)
 docs/plan/              # Planning docs (testing strategy, etc.)
 dist/                   # Build output (.app, .dmg)
 ```
@@ -66,7 +67,7 @@ The app is split into a library target (`OpenClawLib`) and an executable target 
 **OpenClawLauncher.swift** — `@MainActor ObservableObject` viewmodel:
 1. `checkDocker()` — validates Docker; auto-installs and starts Docker Desktop on macOS (90s timeout)
 2. `firstRunSetup()` — migrates old state dir, generates 64-char hex token, creates `~/.openclaw-launcher/` with `.env` and `openclaw.json`
-3. `ensureImage()` — `docker pull ghcr.io/openclaw/openclaw:latest`
+3. `ensureImage()` — `docker pull ghcr.io/anmol1696/openclaw-launcher:base`
 4. `runContainer()` — launches container with lockdown security flags
 5. `waitForGateway()` — polls `localhost:18789` (30 attempts, 1s apart)
 6. Health check system: `startHealthCheck()` / `stopHealthCheck()` / `checkGatewayHealth()` with 5s polling
@@ -76,13 +77,13 @@ The app is split into a library target (`OpenClawLib`) and an executable target 
 
 **AnthropicOAuth.swift** — PKCE OAuth flow for Anthropic sign-in
 
-**Docker image**: Uses upstream `ghcr.io/openclaw/openclaw:latest` (multi-arch). The launcher applies lockdown security flags at `docker run` time.
+**Docker image**: Custom images extending upstream `ghcr.io/openclaw/openclaw:latest` — built from `docker/` dir in three flavors (base, lite, full). Published to `ghcr.io/anmol1696/openclaw-launcher:<flavor>`. Lockdown security flags applied at `docker run` time.
 
 **User data** persists in `~/.openclaw-launcher/` with subdirs `config/` and `workspace/`, mounted into the container.
 
 ## Key Design Decisions
 
-- Uses the upstream Docker image (`ghcr.io/openclaw/openclaw:latest`) — no custom Dockerfile needed
+- Custom Docker images extend upstream `ghcr.io/openclaw/openclaw:latest` with extra tools (jq, ripgrep, fd, sqlite3, Python, ffmpeg, Playwright)
 - The Swift app uses `Process` for async shell execution via `Task.detached` for pipe reading
 - Container runs in lockdown mode: `--read-only`, `--cap-drop ALL`, `--no-new-privileges`, `--memory 2g`, `--pids-limit 256`, localhost-only port binding
 - Gateway token is auto-generated on first run and stored in `~/.openclaw-launcher/.env`

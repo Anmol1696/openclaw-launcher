@@ -20,7 +20,7 @@ set -euo pipefail
 # --- Config ---
 VERSION="1.0.0"
 CONTAINER_NAME="openclaw"
-IMAGE_NAME="ghcr.io/openclaw/openclaw:latest"
+IMAGE_NAME="ghcr.io/anmol1696/openclaw-launcher:${OPENCLAW_FLAVOR:-base}"
 STATE_DIR="$HOME/.openclaw-launcher"
 CONFIG_DIR="$STATE_DIR/config"
 WORKSPACE_DIR="$STATE_DIR/workspace"

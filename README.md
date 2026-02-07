@@ -158,6 +158,9 @@ Or let CI build it — push to `main` and download the `.dmg` artifact from GitH
 ```
 openclaw-launcher/
 ├── run.sh                    # Shell launcher (for devs)
+├── docker/
+│   ├── Dockerfile            # Multi-stage build (targets: base, lite, full)
+│   └── README.md             # Flavor docs + build instructions
 ├── app/macos/
 │   ├── Package.swift         # Swift package manifest
 │   ├── Sources/
@@ -174,6 +177,29 @@ openclaw-launcher/
 ├── docs/plan/                # Planning docs
 └── .github/workflows/        # CI (build + test)
 ```
+
+## Docker Image Flavors
+
+The launcher uses custom images that extend the upstream OpenClaw image with extra tools.
+
+| Flavor | Tag | Tools added | Image size |
+|--------|-----|-------------|------------|
+| **base** | `base` / `latest` | jq, ripgrep, fd, sqlite3 | 1.65 GB |
+| **lite** | `lite` | base + Python 3, pandas, matplotlib, Pillow | 1.96 GB |
+| **full** | `full` | lite + ffmpeg, Playwright + Chromium | 3.28 GB |
+| *upstream* | — | *none (includes build tools)* | *2.59 GB* |
+
+The macOS app currently uses the upstream image. Custom flavor selection and bring-your-own-image support are coming in a future release via advanced settings.
+
+The shell launcher already supports `OPENCLAW_FLAVOR`:
+
+```bash
+OPENCLAW_FLAVOR=full ./run.sh
+```
+
+See [`docker/README.md`](docker/README.md) for build instructions and full tool inventory.
+
+---
 
 ## Security: Lockdown Mode
 
