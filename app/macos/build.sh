@@ -90,11 +90,23 @@ PLIST
 echo "   ✅ .app bundle created"
 
 # ──────────────────────────────────────────────
-# 3. Ad-hoc code sign (prevents macOS "damaged" error)
+# 3. Code signing
 # ──────────────────────────────────────────────
-echo "   Code signing (ad-hoc)..."
-codesign --force --deep --sign - "$APP_DIR"
-echo "   ✅ Signed"
+# DEVELOPER_ID: Set to sign with Developer ID (e.g., "Developer ID Application: Name (TEAMID)")
+# Without DEVELOPER_ID: ad-hoc signing (local dev only, triggers Gatekeeper warnings)
+if [ -n "${DEVELOPER_ID:-}" ]; then
+    echo "   Code signing with Developer ID..."
+    codesign --force --sign "$DEVELOPER_ID" \
+        --options runtime \
+        --timestamp \
+        --entitlements "$SCRIPT_DIR/OpenClawLauncher.entitlements" \
+        "$APP_DIR"
+    echo "   ✅ Signed with Developer ID"
+else
+    echo "   Code signing (ad-hoc)..."
+    codesign --force --deep --sign - "$APP_DIR"
+    echo "   ✅ Signed (ad-hoc — will trigger Gatekeeper warning)"
+fi
 
 # ──────────────────────────────────────────────
 # 4. Create .dmg

@@ -32,7 +32,7 @@ public struct MenuBarContent: View {
         Divider()
 
         Button("View Logs") {
-            launcher.viewLogs()
+            launcher.fetchLogs()
         }
 
         Button("Show Window") {
@@ -40,6 +40,16 @@ public struct MenuBarContent: View {
             let window = NSApp.windows.first { $0.contentView != nil && $0.title != "" }
                 ?? NSApp.windows.first
             window?.makeKeyAndOrderFront(nil)
+        }
+
+        Button("Sign In Again...") {
+            launcher.reAuthenticate()
+        }
+
+        Divider()
+
+        Button("Reset & Clean Up...") {
+            launcher.showResetConfirm = true
         }
 
         Divider()
@@ -72,13 +82,8 @@ public struct LauncherView: View {
                 .frame(height: 120)
 
                 VStack(spacing: 8) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 42))
-                            .foregroundStyle(.white)
-                        Text("🐙")
-                            .font(.system(size: 42))
-                    }
+                    Text("🐙")
+                        .font(.system(size: 48))
                     Text("OpenClaw Launcher")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
@@ -86,6 +91,22 @@ public struct LauncherView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.9))
                 }
+            }
+
+            // Auth expired banner
+            if let banner = launcher.authExpiredBanner {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(banner)
+                        .font(.system(size: 12))
+                    Spacer()
+                    Button("Dismiss") { launcher.authExpiredBanner = nil }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11))
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1))
             }
 
             // Content area
@@ -96,6 +117,15 @@ public struct LauncherView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $launcher.showLogSheet) {
+            LogViewerSheet(launcher: launcher)
+        }
+        .alert("Reset & Clean Up", isPresented: $launcher.showResetConfirm) {
+            Button("Reset", role: .destructive) { launcher.resetEverything() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will stop the container, remove it, and delete all local config (~/.openclaw-launcher). You'll need to set up again.")
+        }
     }
 }
 
@@ -157,7 +187,7 @@ public struct DashboardView: View {
                     .controlSize(.large)
 
                     HStack(spacing: 12) {
-                        Button(action: { launcher.viewLogs() }) {
+                        Button(action: { launcher.fetchLogs() }) {
                             HStack {
                                 Image(systemName: "doc.text")
                                 Text("View Logs")
@@ -268,6 +298,14 @@ struct SetupView: View {
                                 }
                             }
 
+                            if let pullProgress = launcher.pullProgressText {
+                                Text(pullProgress)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+
                             ProgressView(value: launcher.progress)
                                 .progressViewStyle(.linear)
                         }
@@ -285,6 +323,8 @@ struct SetupView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    } else if launcher.state == .needsAuth || launcher.state == .waitingForOAuthCode {
+                        // Auth screen — no step list, auth controls are in the bottom area
                     } else {
                         ForEach(launcher.steps) { step in
                             StepRow(step: step)
@@ -312,6 +352,8 @@ struct SetupView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                } else if launcher.state == .error && launcher.needsDockerInstall {
+                    DockerInstallGuideView(launcher: launcher)
                 } else if launcher.state == .error {
                     HStack(spacing: 12) {
                         Button("Retry") {
@@ -420,6 +462,104 @@ struct OAuthCodeInputView: View {
                     .buttonStyle(.bordered).controlSize(.large)
             }
         }
+    }
+}
+
+// MARK: - Docker Install Guide
+
+struct DockerInstallGuideView: View {
+    @ObservedObject var launcher: OpenClawLauncher
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.down.app.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.blue)
+
+            Text("Docker Desktop Required")
+                .font(.system(size: 16, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Download & install Docker Desktop", systemImage: "1.circle.fill")
+                Label("Open Docker Desktop and wait for it to start", systemImage: "2.circle.fill")
+                Label("Come back here and tap Retry", systemImage: "3.circle.fill")
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+
+            VStack(spacing: 10) {
+                Button(action: {
+                    NSWorkspace.shared.open(URL(string: "https://www.docker.com/products/docker-desktop/")!)
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle")
+                        Text("Download Docker Desktop")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button("Retry") {
+                    launcher.start()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+        }
+    }
+}
+
+// MARK: - Log Viewer Sheet
+
+struct LogViewerSheet: View {
+    @ObservedObject var launcher: OpenClawLauncher
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Container Logs")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("Refresh") { launcher.fetchLogs() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(launcher.containerLogs, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button("Open in Terminal") { launcher.viewLogs() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView {
+                Text(launcher.containerLogs.isEmpty ? "No logs available." : launcher.containerLogs)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Close") { launcher.showLogSheet = false }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 600, height: 400)
     }
 }
 

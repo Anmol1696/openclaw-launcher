@@ -53,6 +53,38 @@ public enum AnthropicOAuth {
         return components.url!
     }
 
+    public static func refreshAccessToken(refreshToken: String) async throws -> OAuthCredentials {
+        let payload: [String: Any] = [
+            "grant_type": "refresh_token",
+            "client_id": clientId,
+            "refresh_token": refreshToken,
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? "<error>"
+            throw NSError(domain: "AnthropicOAuth", code: (response as? HTTPURLResponse)?.statusCode ?? 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Token refresh failed: \(text)"])
+        }
+
+        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let access = decoded?["access_token"] as? String,
+              let expiresIn = decoded?["expires_in"] as? Double else {
+            throw NSError(domain: "AnthropicOAuth", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Unexpected refresh response"])
+        }
+
+        let newRefresh = decoded?["refresh_token"] as? String ?? refreshToken
+        let expiresAtMs = Int64(Date().timeIntervalSince1970 * 1000) + Int64(expiresIn * 1000) - Int64(5 * 60 * 1000)
+        return OAuthCredentials(type: "oauth", refresh: newRefresh, access: access, expires: expiresAtMs)
+    }
+
     public static func exchangeCode(code: String, verifier: String) async throws -> OAuthCredentials {
         let payload: [String: Any] = [
             "grant_type": "authorization_code",

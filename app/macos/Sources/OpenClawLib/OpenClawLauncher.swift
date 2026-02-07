@@ -1,5 +1,52 @@
 import SwiftUI
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "ai.openclaw.launcher", category: "Launcher")
+
+// MARK: - Process Shell Executor (real implementation)
+
+public struct ProcessShellExecutor: ShellExecutor {
+    public init() {}
+
+    public func run(_ args: [String]) async throws -> ShellResult {
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/Applications/Docker.app/Contents/Resources/bin",
+        ]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+        process.environment = env
+
+        try process.run()
+
+        let outData = try await Task.detached {
+            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+        let errData = try await Task.detached {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }.value
+
+        process.waitUntilExit()
+
+        return ShellResult(
+            exitCode: Int(process.terminationStatus),
+            stdout: String(data: outData, encoding: .utf8) ?? "",
+            stderr: String(data: errData, encoding: .utf8) ?? ""
+        )
+    }
+}
 
 @MainActor
 public class OpenClawLauncher: ObservableObject {
@@ -14,26 +61,59 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var menuBarStatus: MenuBarStatus = .stopped
     @Published public var containerStartTime: Date?
     @Published public var uptimeTick: UInt = 0
+    @Published public var pullProgressText: String?
+    @Published public var containerLogs: String = ""
+    @Published public var showLogSheet: Bool = false
+    @Published public var showResetConfirm: Bool = false
+    @Published public var needsDockerInstall: Bool = false
+    @Published public var authExpiredBanner: String?
 
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
     private var healthCheckTimer: Timer?
+    private var healthCheckFailCount = 0
     private var uptimeTimer: Timer?
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
     private let port: Int = 18789
     private var hasStarted = false
+    private let shellExecutor: ShellExecutor
 
-    private var stateDir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".openclaw-launcher")
-    }
+    // Configurable for testing (avoid 90s waits)
+    private let dockerRetryCount: Int
+    private let dockerRetryDelayNs: UInt64
+    private let gatewayRetryCount: Int
+    private let gatewayRetryDelayNs: UInt64
+    private let gatewayTimeoutSecs: TimeInterval
+
+    private let stateDir: URL
     private var configDir: URL { stateDir.appendingPathComponent("config") }
     private var workspaceDir: URL { stateDir.appendingPathComponent("workspace") }
     private var envFile: URL { stateDir.appendingPathComponent(".env") }
 
-    public init() {}
+    /// When true, suppresses real system side effects (opening browser, Docker.app, timers).
+    /// Used in integration tests.
+    public var suppressSideEffects = false
+
+    public init(
+        shell: ShellExecutor = ProcessShellExecutor(),
+        stateDir: URL? = nil,
+        dockerRetryCount: Int = 45,
+        dockerRetryDelayNs: UInt64 = 2_000_000_000,
+        gatewayRetryCount: Int = 30,
+        gatewayRetryDelayNs: UInt64 = 2_000_000_000,  // 2 seconds between retries
+        gatewayTimeoutSecs: TimeInterval = 5
+    ) {
+        self.shellExecutor = shell
+        self.stateDir = stateDir ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".openclaw-launcher")
+        self.dockerRetryCount = dockerRetryCount
+        self.dockerRetryDelayNs = dockerRetryDelayNs
+        self.gatewayRetryCount = gatewayRetryCount
+        self.gatewayRetryDelayNs = gatewayRetryDelayNs
+        self.gatewayTimeoutSecs = gatewayTimeoutSecs
+    }
 
     deinit {
         healthCheckTimer?.invalidate()
@@ -74,16 +154,24 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Public
 
     public func start() {
+        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted)")
         guard !hasStarted || state == .stopped || state == .error else { return }
         hasStarted = true
         steps = []
+        needsDockerInstall = false
         state = .working
         menuBarStatus = .starting
 
         Task {
             do {
+                // Quick check: is the container already running from a previous session?
+                if await tryRecoverRunningContainer() { return }
+
                 try await checkDocker()
                 try await firstRunSetup()
+
+                // Check for expired OAuth tokens and attempt refresh
+                await refreshOAuthIfNeeded()
 
                 // Pause for auth on first run
                 if isFirstRun && !authProfileExists() && !oauthCredentialsExist() {
@@ -93,11 +181,54 @@ public class OpenClawLauncher: ObservableObject {
 
                 try await continueAfterSetup()
             } catch {
+                if let launcherError = error as? LauncherError,
+                   case .dockerNotInstalled = launcherError {
+                    needsDockerInstall = true
+                }
                 addStep(.error, error.localizedDescription)
                 state = .error
                 menuBarStatus = .stopped
             }
         }
+    }
+
+    /// Detect a running container from a previous app session and resume monitoring it.
+    private func tryRecoverRunningContainer() async -> Bool {
+        logger.info("tryRecoverRunningContainer: checking...")
+
+        // Check if docker is even available (quick test, don't install)
+        guard let info = try? await shell("docker", "info"),
+              info.exitCode == 0 else {
+            logger.info("tryRecoverRunningContainer: docker not available")
+            return false
+        }
+
+        // Check if our container is running
+        guard let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}"),
+              !ps.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.info("tryRecoverRunningContainer: container NOT running")
+            return false
+        }
+
+        // Container is running — load config and resume
+        logger.info("tryRecoverRunningContainer: container IS running, recovering")
+        migrateOldStateDir()
+        if FileManager.default.fileExists(atPath: envFile.path) {
+            if let content = try? String(contentsOf: envFile, encoding: .utf8) {
+                for line in content.split(separator: "\n") {
+                    if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
+                        gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+                    }
+                }
+            }
+        }
+
+        addStep(.done, "Recovered running container")
+        state = .running
+        menuBarStatus = .running
+        containerStartTime = Date() // approximate — we don't know exact start
+        startHealthCheck()
+        return true
     }
 
     public func stopContainer() {
@@ -144,21 +275,23 @@ public class OpenClawLauncher: ObservableObject {
         if !key.isEmpty {
             let authDir = configDir.appendingPathComponent("agents/default/agent")
             let authFile = authDir.appendingPathComponent("auth-profiles.json")
-            let json = """
-            {
-              "version": 1,
-              "profiles": {
-                "anthropic:default": {
-                  "type": "api_key",
-                  "provider": "anthropic",
-                  "key": "\(key)"
-                }
-              }
+            let payload: [String: Any] = [
+                "version": 1,
+                "profiles": [
+                    "anthropic:default": [
+                        "type": "api_key",
+                        "provider": "anthropic",
+                        "key": key
+                    ]
+                ]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted),
+               let _ = try? data.write(to: authFile) {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
+                addStep(.done, "API key saved")
+            } else {
+                addStep(.error, "Failed to save API key")
             }
-            """
-            try? json.write(to: authFile, atomically: true, encoding: .utf8)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
-            addStep(.done, "API key saved")
         } else {
             addStep(.warning, "Skipped API key — set up later in Control UI")
         }
@@ -282,6 +415,10 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func openBrowser() {
+        guard !suppressSideEffects else {
+            addStep(.done, "Opened Control UI in browser")
+            return
+        }
         var urlString = "http://localhost:\(port)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
@@ -292,6 +429,10 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func viewLogs() {
+        guard !suppressSideEffects else {
+            addStep(.done, "Opened logs in Terminal")
+            return
+        }
         let script = "tell application \"Terminal\" to do script \"docker logs -f \(containerName)\""
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(nil)
@@ -302,6 +443,98 @@ public class OpenClawLauncher: ObservableObject {
         steps.append(LaunchStep(status: status, message: message))
         if steps.count > 50 {
             steps.removeFirst(steps.count - 50)
+        }
+    }
+
+    // MARK: - Reset & Cleanup
+
+    public func resetEverything() {
+        Task {
+            addStep(.running, "Stopping container...")
+            _ = try? await shell("docker", "stop", containerName)
+            _ = try? await shell("docker", "rm", "-f", containerName)
+            addStep(.done, "Container removed")
+
+            // Remove all local state
+            try? FileManager.default.removeItem(at: stateDir)
+            addStep(.done, "Local config cleaned up")
+
+            steps = []
+            gatewayToken = nil
+            uptimeTick = 0
+            containerStartTime = nil
+            gatewayHealthy = false
+            gatewayStatusData = nil
+            isFirstRun = false
+            hasStarted = false
+            state = .stopped
+            menuBarStatus = .stopped
+            authExpiredBanner = nil
+            stopHealthCheck()
+        }
+    }
+
+    // MARK: - Re-authenticate
+
+    public func reAuthenticate() {
+        Task {
+            // Stop container if running
+            if state == .running {
+                _ = try? await shell("docker", "stop", containerName)
+                stopHealthCheck()
+            }
+
+            // Delete auth files
+            let authFile = configDir.appendingPathComponent("agents/default/agent/auth-profiles.json")
+            let oauthFile = configDir.appendingPathComponent("credentials/oauth.json")
+            try? FileManager.default.removeItem(at: authFile)
+            try? FileManager.default.removeItem(at: oauthFile)
+
+            steps = []
+            gatewayHealthy = false
+            uptimeTick = 0
+            containerStartTime = nil
+            hasStarted = false
+            menuBarStatus = .stopped
+            state = .needsAuth
+        }
+    }
+
+    // MARK: - Log Viewer
+
+    public func fetchLogs() {
+        Task {
+            let result = try? await shell("docker", "logs", "--tail", "300", containerName)
+            let stdout = result?.stdout ?? ""
+            let stderr = result?.stderr ?? ""
+            containerLogs = stdout.isEmpty ? stderr : stdout + (stderr.isEmpty ? "" : "\n--- stderr ---\n" + stderr)
+            showLogSheet = true
+        }
+    }
+
+    // MARK: - OAuth Token Refresh
+
+    private func refreshOAuthIfNeeded() async {
+        let oauthFile = configDir.appendingPathComponent("credentials/oauth.json")
+        guard FileManager.default.fileExists(atPath: oauthFile.path),
+              let data = try? Data(contentsOf: oauthFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let anthropic = json["anthropic"] as? [String: Any],
+              let expires = anthropic["expires"] as? Int64,
+              let refreshToken = anthropic["refresh"] as? String else { return }
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard nowMs >= expires else { return } // not expired
+
+        // Attempt refresh
+        do {
+            let creds = try await AnthropicOAuth.refreshAccessToken(refreshToken: refreshToken)
+            try saveOAuthCredentials(creds)
+            addStep(.done, "OAuth token refreshed")
+            authExpiredBanner = nil
+        } catch {
+            authExpiredBanner = "Auth expired — re-authenticate in Control UI"
+            addStep(.warning, "OAuth token expired (refresh failed)")
         }
     }
 
@@ -329,20 +562,21 @@ public class OpenClawLauncher: ObservableObject {
         // Check if Docker.app is installed
         let dockerAppExists = FileManager.default.fileExists(atPath: "/Applications/Docker.app")
 
-        // If neither exists, download and install Docker Desktop
+        // If neither exists, prompt user to install
         if !dockerCliExists && !dockerAppExists {
-            try await installDocker()
+            throw LauncherError.dockerNotInstalled
         }
 
         let result = try? await shell("docker", "info")
         if result == nil || result!.exitCode != 0 {
             // Try to start Docker Desktop
             addStep(.warning, "Docker not running. Starting Docker Desktop...")
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
+            if !suppressSideEffects {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
+            }
 
-            // Wait up to 90 seconds
-            for _ in 0..<45 {
-                try await Task.sleep(nanoseconds: 2_000_000_000)
+            for _ in 0..<dockerRetryCount {
+                try await Task.sleep(nanoseconds: dockerRetryDelayNs)
                 let check = try? await shell("docker", "info")
                 if check?.exitCode == 0 {
                     addStep(.done, "Docker is ready")
@@ -353,71 +587,6 @@ public class OpenClawLauncher: ObservableObject {
         }
 
         addStep(.done, "Docker is ready")
-    }
-
-    private func installDocker() async throws {
-        addStep(.running, "Docker Desktop not found. Downloading...")
-
-        // Detect architecture
-        let arch = try await shell("uname", "-m")
-        let archString = arch.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dmgURL: URL
-        if archString == "arm64" {
-            dmgURL = URL(string: "https://desktop.docker.com/mac/main/arm64/Docker.dmg")!
-        } else {
-            dmgURL = URL(string: "https://desktop.docker.com/mac/main/amd64/Docker.dmg")!
-        }
-
-        // Download DMG to temp directory
-        let tempDir = FileManager.default.temporaryDirectory
-        let dmgPath = tempDir.appendingPathComponent("Docker.dmg")
-
-        // Clean up any previous download
-        try? FileManager.default.removeItem(at: dmgPath)
-
-        addStep(.running, "Downloading Docker Desktop (\(archString))... This may take a few minutes.")
-
-        let (downloadedURL, _) = try await URLSession.shared.download(from: dmgURL)
-        try FileManager.default.moveItem(at: downloadedURL, to: dmgPath)
-
-        addStep(.done, "Download complete")
-        addStep(.running, "Installing Docker Desktop...")
-
-        // Mount DMG
-        let mount = try await shell("hdiutil", "attach", "-nobrowse", "-quiet", dmgPath.path)
-        if mount.exitCode != 0 {
-            throw LauncherError.dockerInstallFailed("Failed to mount DMG: \(mount.stderr.prefix(200))")
-        }
-
-        // Find the mounted volume
-        let volumePath = "/Volumes/Docker"
-        let sourceApp = "\(volumePath)/Docker.app"
-
-        guard FileManager.default.fileExists(atPath: sourceApp) else {
-            _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-            throw LauncherError.dockerInstallFailed("Docker.app not found in mounted DMG")
-        }
-
-        // Copy to /Applications — try direct copy first
-        let copy = try await shell("/bin/cp", "-R", sourceApp, "/Applications/Docker.app")
-        if copy.exitCode != 0 {
-            // Need admin privileges — use osascript to prompt
-            addStep(.warning, "Requesting administrator permission to install...")
-            let adminCopy = try await shell(
-                "osascript", "-e",
-                "do shell script \"cp -R '\(sourceApp)' '/Applications/Docker.app'\" with administrator privileges"
-            )
-            if adminCopy.exitCode != 0 {
-                _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-                throw LauncherError.dockerInstallFailed("Installation cancelled or failed: \(adminCopy.stderr.prefix(200))")
-            }
-        }
-
-        // Detach DMG and clean up
-        _ = try? await shell("hdiutil", "detach", volumePath, "-quiet")
-        try? FileManager.default.removeItem(at: dmgPath)
-
-        addStep(.done, "Docker Desktop installed")
     }
 
     private func migrateOldStateDir() {
@@ -499,9 +668,12 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Checking for image updates...")
+        addStep(.running, "Pulling latest image... this may take a moment")
+        pullProgressText = nil
 
         let pull = try await shell("docker", "pull", imageName)
+        pullProgressText = nil
+
         if pull.exitCode == 0 {
             addStep(.done, "Docker image up to date")
             return
@@ -514,10 +686,11 @@ public class OpenClawLauncher: ObservableObject {
             return
         }
 
-        throw LauncherError.pullFailed(pull.stderr)
+        throw LauncherError.pullFailed(pull.stderr.isEmpty ? "Image pull failed" : pull.stderr)
     }
 
     private func runContainer() async throws {
+        logger.info("runContainer: starting...")
         guard gatewayToken != nil else {
             throw LauncherError.noToken
         }
@@ -525,11 +698,13 @@ public class OpenClawLauncher: ObservableObject {
         // Check if already running
         let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}")
         if let output = ps?.stdout, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            logger.info("runContainer: container already running, skipping")
             addStep(.done, "Container already running")
             return
         }
 
         // Remove stopped container if exists
+        logger.info("runContainer: removing old container...")
         _ = try? await shell("docker", "rm", "-f", containerName)
 
         addStep(.running, "Starting container (lockdown mode)...")
@@ -581,7 +756,9 @@ public class OpenClawLauncher: ObservableObject {
             "node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"
         )
 
+        logger.info("runContainer: docker run exitCode=\(result.exitCode)")
         if result.exitCode != 0 {
+            logger.error("runContainer: FAILED - \(result.stderr.prefix(200))")
             throw LauncherError.runFailed(result.stderr)
         }
 
@@ -590,23 +767,38 @@ public class OpenClawLauncher: ObservableObject {
 
     private func waitForGateway() async throws {
         addStep(.running, "Waiting for Gateway to be ready...")
+        logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        for _ in 0..<30 {
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
-            if check?.exitCode == 0 {
-                addStep(.done, "Gateway is ready!")
-                return
+        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5  // 5 second timeout per attempt
+
+        for attempt in 1...gatewayRetryCount {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse {
+                    logger.info("waitForGateway: attempt \(attempt), HTTP \(http.statusCode)")
+                    if http.statusCode == 200 {
+                        addStep(.done, "Gateway is ready!")
+                        return
+                    }
+                }
+            } catch {
+                logger.info("waitForGateway: attempt \(attempt), error: \(error.localizedDescription)")
             }
+
+            try await Task.sleep(nanoseconds: gatewayRetryDelayNs)
         }
 
         // Not fatal — might just be slow
+        logger.warning("waitForGateway: TIMEOUT after \(self.gatewayRetryCount) attempts")
         addStep(.warning, "Gateway is still starting. Try opening the browser anyway.")
     }
 
     // MARK: - Health Check
 
     private func startHealthCheck() {
+        guard !suppressSideEffects else { return }
         stopHealthCheck()
 
         uptimeTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -636,30 +828,40 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        do {
-            let url = URL(string: "http://localhost:\(port)/openclaw/api/status")!
-            let (data, response) = try await URLSession.shared.data(from: url)
+        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
 
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                 await MainActor.run {
-                    gatewayHealthy = false
+                    gatewayHealthy = true
+                    healthCheckFailCount = 0
                 }
                 return
             }
-
-            let status = try JSONDecoder().decode(GatewayStatus.self, from: data)
-            await MainActor.run {
-                gatewayHealthy = true
-                gatewayStatusData = status
-            }
         } catch {
-            let check = try? await shell("curl", "-sf", "http://localhost:\(port)/openclaw/")
-            let healthy = check?.exitCode == 0
-            await MainActor.run {
-                gatewayHealthy = healthy
-                if !healthy {
-                    gatewayStatusData = nil
-                }
+            logger.info("checkGatewayHealth: error: \(error.localizedDescription)")
+        }
+
+        await handleHealthCheckFailure()
+    }
+
+    @MainActor private func handleHealthCheckFailure() async {
+        gatewayHealthy = false
+        gatewayStatusData = nil
+        healthCheckFailCount += 1
+
+        // After 3 consecutive failures, check if container is still running
+        if healthCheckFailCount >= 3 {
+            let ps = try? await shell("docker", "ps", "--filter", "name=^\(containerName)$", "--format", "{{.Names}}")
+            let running = !(ps?.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            if !running {
+                addStep(.error, "Container stopped unexpectedly")
+                state = .error
+                menuBarStatus = .stopped
+                stopHealthCheck()
             }
         }
     }
@@ -667,41 +869,7 @@ public class OpenClawLauncher: ObservableObject {
     // MARK: - Shell Helper
 
     private func shell(_ args: String...) async throws -> ShellResult {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        var env = ProcessInfo.processInfo.environment
-        let extraPaths = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/Applications/Docker.app/Contents/Resources/bin",
-        ]
-        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-        process.environment = env
-
-        try process.run()
-
-        // Read pipes concurrently to avoid deadlock when output exceeds buffer
-        let outData = try await Task.detached {
-            stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        }.value
-        let errData = try await Task.detached {
-            stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        }.value
-
-        process.waitUntilExit()
-
-        return ShellResult(
-            exitCode: Int(process.terminationStatus),
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? ""
-        )
+        try await shellExecutor.run(args)
     }
+
 }
