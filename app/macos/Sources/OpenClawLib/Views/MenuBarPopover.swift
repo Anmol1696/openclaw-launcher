@@ -3,6 +3,7 @@ import SwiftUI
 /// Ocean-themed menu bar popover
 public struct MenuBarPopover: View {
     @ObservedObject var launcher: OpenClawLauncher
+    @Environment(\.openWindow) private var openWindow
 
     public init(launcher: OpenClawLauncher) {
         self.launcher = launcher
@@ -98,7 +99,7 @@ public struct MenuBarPopover: View {
             // Footer
             HStack {
                 Button("Settings...") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    openWindow(id: "settings")
                 }
                 .buttonStyle(.plain)
                 .font(Ocean.ui(11))

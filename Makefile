@@ -17,7 +17,7 @@ help:
 	@echo ""
 
 build:
-	@cd $(APP_DIR) && bash build.sh
+	@cd $(APP_DIR) && ./build
 
 run: build open
 

@@ -70,6 +70,10 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var lastError: LauncherError?
     @Published public var activePort: Int = 18789  // The actual port being used (may be random)
 
+    // Resource limits (configurable via settings)
+    private var memoryLimit: String = "2g"
+    private var cpuLimit: String = "2.0"
+
     /// Guards against concurrent start/stop operations to prevent race conditions
     private var isOperationInProgress = false
     private var isFirstRun = false
@@ -155,7 +159,7 @@ public class OpenClawLauncher: ObservableObject {
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
-    // MARK: - Port Configuration
+    // MARK: - Configuration
 
     /// Configure the port based on settings. Call this before starting the container.
     public func configurePort(useRandomPort: Bool, customPort: Int) {
@@ -166,6 +170,13 @@ public class OpenClawLauncher: ObservableObject {
             activePort = customPort
             logger.info("Using custom port: \(self.activePort)")
         }
+    }
+
+    /// Configure resource limits based on settings. Call this before starting the container.
+    public func configureResources(memoryLimit: String, cpuLimit: String) {
+        self.memoryLimit = memoryLimit
+        self.cpuLimit = cpuLimit
+        logger.info("Configured resources: memory=\(memoryLimit), cpu=\(cpuLimit)")
     }
 
     /// Find an available port in the ephemeral range (49152-65535)
@@ -824,10 +835,10 @@ public class OpenClawLauncher: ObservableObject {
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  // writable /tmp, no exec
             "--tmpfs", "/home/node/.npm:rw,size=64m",      // npm might need this
 
-            // --- Resource limits ---
-            "--memory", "2g",                           // max 2GB RAM
-            "--memory-swap", "2g",                      // no swap
-            "--cpus", "2.0",                            // max 2 CPU cores
+            // --- Resource limits (from settings) ---
+            "--memory", memoryLimit,
+            "--memory-swap", memoryLimit,               // no swap beyond memory limit
+            "--cpus", cpuLimit,
             "--pids-limit", "256",                      // prevent fork bombs
 
             // --- Security ---

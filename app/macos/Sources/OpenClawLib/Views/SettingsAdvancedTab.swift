@@ -54,7 +54,8 @@ public struct SettingsAdvancedTab: View {
                     portString = String(settings.customPort)
                 }
                 .onChange(of: portString) { _, newValue in
-                    if let port = Int(newValue), port > 0 && port < 65536 {
+                    // Restrict to non-privileged ports (1024+) to avoid requiring root
+                    if let port = Int(newValue), port >= 1024 && port < 65536 {
                         settings.customPort = port
                     }
                 }

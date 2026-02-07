@@ -17,6 +17,7 @@ struct OpenClawApp: App {
             if !settings.hasCompletedOnboarding {
                 OnboardingView(settings: settings) {
                     // Onboarding complete - launcher will auto-start if user clicked "Launch"
+                    configureLauncher()
                     launcher.start()
                 }
                 .frame(width: 500, height: 400)
@@ -27,7 +28,7 @@ struct OpenClawApp: App {
                     .onAppear {
                         // Auto-start for returning users (will recover running container or start fresh)
                         if launcher.state == .idle {
-                            launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+                            configureLauncher()
                             launcher.start()
                         }
                     }
@@ -53,5 +54,11 @@ struct OpenClawApp: App {
         } label: {
             Text("🐙")
         }
+    }
+
+    /// Configure launcher with current settings (port + resources)
+    private func configureLauncher() {
+        launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+        launcher.configureResources(memoryLimit: settings.memoryLimit.rawValue, cpuLimit: settings.cpuLimit.rawValue)
     }
 }
