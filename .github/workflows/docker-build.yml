@@ -18,7 +18,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BASE: ghcr.io/anmol1696
 
 permissions:
   contents: read
@@ -55,6 +54,9 @@ jobs:
       - name: Generate tags
         id: tags
         run: |
+          # ghcr.io requires lowercase - convert repo name
+          IMAGE_BASE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+
           TAGS="${IMAGE_BASE}:${{ matrix.flavor }}"
           TAGS="${TAGS},${IMAGE_BASE}:${{ matrix.flavor }}-${GITHUB_SHA::7}"
           if [ -n "${{ matrix.tags-extra }}" ]; then
