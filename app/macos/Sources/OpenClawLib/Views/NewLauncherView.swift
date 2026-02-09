@@ -359,6 +359,9 @@ private struct SidebarView: View {
                 Text("OpenClaw")
                     .font(Ocean.ui(16, weight: .bold))
                     .foregroundColor(Ocean.text)
+                Text("Launcher")
+                    .font(Ocean.ui(11, weight: .medium))
+                    .foregroundColor(Ocean.textDim)
             }
             .padding(.top, 20)
             .padding(.bottom, 16)

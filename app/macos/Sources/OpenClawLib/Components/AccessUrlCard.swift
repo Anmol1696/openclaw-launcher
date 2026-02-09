@@ -9,6 +9,20 @@ public struct AccessUrlCard: View {
 
     @State private var copied = false
 
+    /// Shortened URL for display - shows base URL + token hint
+    private var displayUrl: String {
+        // Extract base URL (before ?token=)
+        if let tokenIndex = url.range(of: "?token=") {
+            let baseUrl = String(url[..<tokenIndex.lowerBound])
+            return baseUrl + "?token=..."
+        }
+        // Fallback: truncate if too long
+        if url.count > 35 {
+            return String(url.prefix(32)) + "..."
+        }
+        return url
+    }
+
     public init(url: String, onCopy: @escaping () -> Void, onOpen: @escaping () -> Void) {
         self.url = url
         self.onCopy = onCopy
@@ -35,10 +49,13 @@ public struct AccessUrlCard: View {
                     .foregroundColor(Ocean.textDim)
                     .tracking(1)
 
-                Text(url)
-                    .font(Ocean.mono(16, weight: .medium))
+                Text(displayUrl)
+                    .font(Ocean.mono(12, weight: .medium))
                     .foregroundColor(Ocean.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+            .frame(maxWidth: 180, alignment: .leading)
 
             Spacer()
 
