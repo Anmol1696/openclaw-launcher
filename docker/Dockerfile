@@ -1,23 +1,43 @@
 # ============================================================================
-#  OpenClaw Launcher — Multi-stage, multi-flavor Docker build
+#  OpenClaw Launcher — Slim Docker Images via npm install
 #
-#  Targets:  base, lite, full
+#  Targets:  slim, base, full
 #  Usage:    docker build --target base -t openclaw-launcher:base .
+#
+#  Size comparison (vs 4GB upstream):
+#    slim: ~300MB  (no local LLM)
+#    base: ~500MB  (with node-llama-cpp)
+#    full: ~1.2GB  (+ Python + Playwright)
 # ============================================================================
 
 # --------------------------------------------------------------------------
-#  Stage 0: upstream — use the official image as a pre-built source
+#  Stage 1: builder — compile native modules
+#
+#  Uses full node image with build tools to compile:
+#  - node-llama-cpp (requires cmake, clang)
+#  - @napi-rs/canvas (prebuilt binaries available)
 # --------------------------------------------------------------------------
-FROM ghcr.io/openclaw/openclaw:latest AS upstream
+FROM node:22-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    cmake \
+    clang \
+    libgomp1 \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install openclaw globally with peer dependencies
+# node-llama-cpp requires compilation (cmake/clang)
+RUN npm install -g openclaw node-llama-cpp@3.15.1 @napi-rs/canvas
 
 # --------------------------------------------------------------------------
-#  Stage 1: base — slim runtime + core CLI tools
+#  Stage 2: slim — minimal runtime (no local LLM)
 #
-#  Strips build tooling (gcc, g++, bun, dev headers, pnpm cache) that the
-#  upstream single-stage image ships but doesn't need at runtime.
-#  Adds: jq, ripgrep, fd, sqlite3
+#  Smallest image for users who only use cloud APIs.
+#  Does not include node-llama-cpp.
 # --------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS base
+FROM node:22-bookworm-slim AS slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
@@ -25,70 +45,93 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     fd-find \
     sqlite3 \
-    # runtime libs the app's native modules link against
-    libvips42 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/fdfind /usr/bin/fd
 
-WORKDIR /app
+# Copy global node_modules (openclaw only, no llama)
+COPY --from=builder /usr/local/lib/node_modules/openclaw /usr/local/lib/node_modules/openclaw
+COPY --from=builder /usr/local/lib/node_modules/@napi-rs /usr/local/lib/node_modules/@napi-rs
 
-# Copy only the built app from upstream — no compilers, no source, no cache
-COPY --from=upstream /app/dist        ./dist
-COPY --from=upstream /app/node_modules ./node_modules
-COPY --from=upstream /app/ui          ./ui
-COPY --from=upstream /app/package.json ./package.json
-COPY --from=upstream /app/patches     ./patches
-COPY --from=upstream /app/scripts     ./scripts
+# Create symlink for openclaw CLI
+RUN ln -sf /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
+
+# Create non-root user for runtime
+RUN groupadd -r openclaw && useradd -r -g openclaw -d /home/openclaw openclaw \
+    && mkdir -p /home/openclaw/.openclaw \
+    && chown -R openclaw:openclaw /home/openclaw
 
 ENV NODE_ENV=production
-ENV PATH="/app/node_modules/.bin:${PATH}"
-
-RUN chown -R node:node /app
-
-USER node
+WORKDIR /home/openclaw
+USER openclaw
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "dist/index.js", "gateway", "--allow-unconfigured"]
+CMD ["openclaw", "gateway", "--allow-unconfigured"]
 
 # --------------------------------------------------------------------------
-#  Stage 2: lite — base + Python data stack
+#  Stage 3: base — slim + local LLM support (recommended default)
 #
-#  Adds: Python 3, pandas, matplotlib, Pillow
+#  Includes node-llama-cpp for local model inference.
+#  Future-proof for offline/local LLM use cases.
 # --------------------------------------------------------------------------
-FROM base AS lite
+FROM slim AS base
 
 USER root
 
+# libgomp1 is required by node-llama-cpp at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    pandas matplotlib Pillow
+# Copy node-llama-cpp (compiled in builder)
+COPY --from=builder /usr/local/lib/node_modules/node-llama-cpp /usr/local/lib/node_modules/node-llama-cpp
 
-USER node
+USER openclaw
 
 # --------------------------------------------------------------------------
-#  Stage 3: full — lite + media + browser automation
+#  Stage 4: full — base + Python + Playwright + media tools
 #
-#  Adds: ffmpeg, Playwright + Chromium
+#  For power users who need:
+#  - Python data stack (pandas, matplotlib, Pillow)
+#  - Browser automation (Playwright + Chromium)
+#  - Media processing (ffmpeg)
 # --------------------------------------------------------------------------
-FROM lite AS full
+FROM base AS full
 
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
     ffmpeg \
-    # Chromium runtime deps (what --with-deps would install, but done here
-    # in a single apt layer to avoid stale GPG cache issues)
-    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
-    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
+    # Chromium runtime dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
     libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install playwright CLI + download Chromium binary (no --with-deps needed)
-RUN npm install -g playwright \
-    && playwright install chromium
+# Install Python data science packages
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    pandas \
+    matplotlib \
+    Pillow
 
-USER node
+# Install Playwright and Chromium browser
+RUN npm install -g playwright \
+    && npx playwright install chromium \
+    && npm cache clean --force
+
+USER openclaw

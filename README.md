@@ -180,21 +180,18 @@ openclaw-launcher/
 
 ## Docker Image Flavors
 
-The launcher uses custom images that extend the upstream OpenClaw image with extra tools.
+Slim Docker images that install OpenClaw via npm — **70% smaller** than upstream.
 
-| Flavor | Tag | Tools added | Image size |
-|--------|-----|-------------|------------|
-| **base** | `base` / `latest` | jq, ripgrep, fd, sqlite3 | 1.65 GB |
-| **lite** | `lite` | base + Python 3, pandas, matplotlib, Pillow | 1.96 GB |
-| **full** | `full` | lite + ffmpeg, Playwright + Chromium | 3.28 GB |
-| *upstream* | — | *none (includes build tools)* | *2.59 GB* |
+| Flavor | Tag | What's included | Image size |
+|--------|-----|-----------------|------------|
+| **slim** | `slim` | OpenClaw + jq, ripgrep, fd, sqlite3 | ~300 MB |
+| **base** | `base` | slim + node-llama-cpp (local LLM) | ~500 MB |
+| **full** | `full` | base + Python 3, Playwright, ffmpeg | ~1.2 GB |
 
-The macOS app currently uses the upstream image. Custom flavor selection and bring-your-own-image support are coming in a future release via advanced settings.
-
-The shell launcher already supports `OPENCLAW_FLAVOR`:
+**Recommended:** Use `base` for future-proof local LLM support.
 
 ```bash
-OPENCLAW_FLAVOR=full ./run.sh
+OPENCLAW_FLAVOR=base ./scripts/run.sh
 ```
 
 See [`docker/README.md`](docker/README.md) for build instructions and full tool inventory.
