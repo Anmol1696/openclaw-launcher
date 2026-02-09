@@ -32,13 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy only the built app from upstream — no compilers, no source, no cache
-COPY --from=upstream /app/dist        ./dist
-COPY --from=upstream /app/node_modules ./node_modules
-COPY --from=upstream /app/ui          ./ui
-COPY --from=upstream /app/package.json ./package.json
-COPY --from=upstream /app/patches     ./patches
-COPY --from=upstream /app/scripts     ./scripts
+# Copy the entire app from upstream — no compilers, no source, no cache
+# Using /app ./ ensures we don't miss plugins, configs, or future additions
+COPY --from=upstream /app ./
 
 ENV NODE_ENV=production
 ENV PATH="/app/node_modules/.bin:${PATH}"
