@@ -290,19 +290,14 @@ public class OpenClawLauncher: ObservableObject {
         // Container is running — load config and resume
         logger.info("tryRecoverRunningContainer: container IS running, recovering")
         migrateOldStateDir()
-        if FileManager.default.fileExists(atPath: envFile.path) {
-            if let content = try? String(contentsOf: envFile, encoding: .utf8) {
-                for line in content.split(separator: "\n") {
-                    if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
-                        gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
-                    } else if line.hasPrefix("OPENCLAW_PORT=") {
-                        if let port = Int(line.dropFirst("OPENCLAW_PORT=".count)) {
-                            activePort = port
-                            logger.info("tryRecoverRunningContainer: recovered port \(port)")
-                        }
-                    }
-                }
-            }
+
+        if let port = loadStoredPort() {
+            activePort = port
+            logger.info("tryRecoverRunningContainer: recovered port \(port)")
+        }
+        if let token = loadStoredToken() {
+            gatewayToken = token
+            logger.info("tryRecoverRunningContainer: recovered token")
         }
 
         addStep(.done, "Recovered running container")
@@ -521,9 +516,17 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.done, "Opened Control UI in browser")
             return
         }
+
+        // Always reload token from config to ensure we have the latest
+        if let freshToken = loadStoredToken() {
+            gatewayToken = freshToken
+        }
+
         var urlString = "http://localhost:\(activePort)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
+        } else {
+            logger.warning("openBrowser: no token available, browser may fail to authenticate")
         }
         let url = URL(string: urlString)!
         NSWorkspace.shared.open(url)
@@ -563,17 +566,30 @@ public class OpenClawLauncher: ObservableObject {
 
     public func resetEverything() {
         Task {
+            // 1. Save the current token before deleting (preserves browser auth)
+            let savedToken = loadStoredToken()
+
             addStep(.running, "Stopping container...")
             _ = try? await shell("docker", "stop", containerName)
             _ = try? await shell("docker", "rm", "-f", containerName)
             addStep(.done, "Container removed")
 
-            // Remove all local state
+            // 2. Remove all local state
             try? FileManager.default.removeItem(at: stateDir)
             addStep(.done, "Local config cleaned up")
 
+            // 3. Recreate .env with preserved token (so browser doesn't get out of sync)
+            if let token = savedToken {
+                try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+                let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(activePort)\n"
+                try? envContent.write(to: envFile, atomically: true, encoding: .utf8)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envFile.path)
+                logger.info("resetEverything: preserved gateway token")
+            }
+
+            // 4. Clear state (but keep token in memory)
             steps = []
-            gatewayToken = nil
+            gatewayToken = savedToken
             uptimeTick = 0
             containerStartTime = nil
             gatewayHealthy = false
@@ -712,16 +728,48 @@ public class OpenClawLauncher: ObservableObject {
         }
     }
 
+    /// Load the gateway token from stored config.
+    /// Prefers openclaw.json (what the gateway uses) over .env.
+    private func loadStoredToken() -> String? {
+        let configFile = configDir.appendingPathComponent("openclaw.json")
+
+        // Try openclaw.json first (authoritative source)
+        if let data = try? Data(contentsOf: configFile),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let gateway = json["gateway"] as? [String: Any],
+           let auth = gateway["auth"] as? [String: Any],
+           let token = auth["token"] as? String {
+            return token
+        }
+
+        // Fallback to .env
+        if let content = try? String(contentsOf: envFile, encoding: .utf8) {
+            for line in content.split(separator: "\n") where line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
+                return String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+            }
+        }
+
+        return nil
+    }
+
+    /// Load the port from .env file.
+    private func loadStoredPort() -> Int? {
+        guard let content = try? String(contentsOf: envFile, encoding: .utf8) else { return nil }
+        for line in content.split(separator: "\n") where line.hasPrefix("OPENCLAW_PORT=") {
+            return Int(line.dropFirst("OPENCLAW_PORT=".count))
+        }
+        return nil
+    }
+
     private func firstRunSetup() async throws {
         migrateOldStateDir()
 
-        // Load existing token if present
-        if FileManager.default.fileExists(atPath: envFile.path) {
-            let content = try String(contentsOf: envFile, encoding: .utf8)
-            for line in content.split(separator: "\n") {
-                if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
-                    gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
-                }
+        // Check if config already exists
+        let configFile = configDir.appendingPathComponent("openclaw.json")
+        if FileManager.default.fileExists(atPath: configFile.path) {
+            if let token = loadStoredToken() {
+                gatewayToken = token
+                logger.info("firstRunSetup: loaded existing token")
             }
             addStep(.done, "Loaded existing configuration")
             return
@@ -767,7 +815,6 @@ public class OpenClawLauncher: ObservableObject {
   }
 }
 """
-        let configFile = configDir.appendingPathComponent("openclaw.json")
         try config.write(to: configFile, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFile.path)
 

@@ -283,6 +283,7 @@ public struct NewLauncherView: View {
             return [
                 .init(title: "Launch", icon: "▶") {
                     launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+                    launcher.configureResources(memoryLimit: settings.memoryLimit.rawValue, cpuLimit: settings.cpuLimit.rawValue)
                     launcher.start()
                 }
             ]
@@ -305,6 +306,7 @@ public struct NewLauncherView: View {
             return [
                 .init(title: "Retry", icon: "↻") {
                     launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+                    launcher.configureResources(memoryLimit: settings.memoryLimit.rawValue, cpuLimit: settings.cpuLimit.rawValue)
                     launcher.start()
                 },
                 .init(title: "Dismiss", variant: .secondary) {
@@ -487,53 +489,46 @@ private struct MainContentView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Error State
-                if launcher.state == .error {
+                switch launcher.state {
+                case .idle, .stopped:
+                    // Clean idle view - no checklist
+                    IdleContentView(port: launcher.activePort)
+
+                case .working:
+                    // Launching checklist with progress
+                    StatusPanel(
+                        status: pulseStatus,
+                        statusText: "Launching OpenClaw...",
+                        badgeStyle: badgeStyle,
+                        steps: stepInfos,
+                        progress: progress,
+                        progressLeftText: progressLeftText
+                    )
+
+                case .running:
+                    // Dashboard with stats grid
+                    RunningDashboardView(launcher: launcher)
+
+                case .error:
                     ErrorStateView(
                         errorType: errorType,
                         onRetry: {
                             launcher.configurePort(useRandomPort: settings.useRandomPort, customPort: settings.customPort)
+                            launcher.configureResources(memoryLimit: settings.memoryLimit.rawValue, cpuLimit: settings.cpuLimit.rawValue)
                             launcher.start()
                         },
                         onSecondary: errorSecondaryAction,
                         onTertiary: errorTertiaryAction
                     )
-                } else if launcher.state == .needsAuth {
-                    // Auth choice view
+
+                case .needsAuth:
                     OceanAuthChoiceView(launcher: launcher)
-                } else if launcher.state == .waitingForOAuthCode {
-                    // OAuth or API key input
+
+                case .waitingForOAuthCode:
                     if launcher.showApiKeyField {
                         OceanApiKeyInputView(launcher: launcher)
                     } else {
                         OceanOAuthCodeInputView(launcher: launcher)
-                    }
-                } else {
-                    // Status Panel with steps
-                    StatusPanel(
-                        status: pulseStatus,
-                        statusText: statusText,
-                        badge: "lockdown",
-                        badgeStyle: badgeStyle,
-                        steps: stepInfos,
-                        progress: progress,
-                        progressLeftText: progressLeftText,
-                        progressRightText: progressRightText
-                    )
-
-                    // Info Card (only when running)
-                    if launcher.state == .running {
-                        InfoCard(rows: [
-                            .init(
-                                label: "Gateway URL",
-                                value: "http://localhost:\(launcher.activePort)/openclaw",
-                                copyable: true
-                            ),
-                            .init(label: "Status", value: "", isConnected: launcher.gatewayHealthy),
-                        ])
-
-                        // Tip card
-                        TipCard()
                     }
                 }
             }

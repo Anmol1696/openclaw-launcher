@@ -25,13 +25,6 @@ struct OpenClawApp: App {
                 NewLauncherView(launcher: launcher, settings: settings)
                     .frame(width: 700, height: launcher.state == .running ? 520 : 480)
                     .animation(.easeInOut(duration: 0.3), value: launcher.state)
-                    .onAppear {
-                        // Auto-start for returning users (will recover running container or start fresh)
-                        if launcher.state == .idle {
-                            configureLauncher()
-                            launcher.start()
-                        }
-                    }
             }
         }
         .windowStyle(.hiddenTitleBar)
