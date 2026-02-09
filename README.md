@@ -31,7 +31,7 @@ xattr -cr /Applications/OpenClawLauncher.app
 ### Option 2: One-liner (macOS/Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/run.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/scripts/run.sh | bash
 ```
 
 Requires: Docker, curl, python3, openssl
