@@ -8,7 +8,7 @@ PLATFORMS     := linux/amd64,linux/arm64
 FLAVOR        ?= base
 
 # All flavors in dependency order
-FLAVORS       := base lite full
+FLAVORS       := slim base full
 
 .PHONY: help build build-all push push-all run shell verify verify-all clean
 
@@ -20,7 +20,7 @@ help: ## Show this help
 #  Build
 # ---------------------------------------------------------------------------
 
-build: ## Build a single flavor (FLAVOR=base|lite|full)
+build: ## Build a single flavor (FLAVOR=slim|base|full)
 	$(DOCKER) build \
 		--target $(FLAVOR) \
 		-f $(DOCKERFILE) \
@@ -74,7 +74,7 @@ push-all: ## Build + push all flavors to GHCR (multi-arch)
 #  Run / Debug
 # ---------------------------------------------------------------------------
 
-run: ## Run a flavor (FLAVOR=base|lite|full)
+run: ## Run a flavor (FLAVOR=slim|base|full)
 	$(DOCKER) run --rm -it \
 		-p 127.0.0.1:18789:18789 \
 		$(DOCKER_REPO):$(FLAVOR)
@@ -94,14 +94,15 @@ verify: ## Verify tools are present in a flavor
 	@$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) rg --version | head -1
 	@$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) fd --version
 	@$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) sqlite3 --version
-	@if [ "$(FLAVOR)" = "lite" ] || [ "$(FLAVOR)" = "full" ]; then \
-		$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) python3 -c "import pandas; print('pandas', pandas.__version__)"; \
-		$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) python3 -c "import matplotlib; print('matplotlib', matplotlib.__version__)"; \
-		$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) python3 -c "from PIL import Image; print('Pillow OK')"; \
+	@if [ "$(FLAVOR)" = "base" ] || [ "$(FLAVOR)" = "full" ]; then \
+		$(DOCKER) run --rm --entrypoint node $(DOCKER_REPO):$(FLAVOR) -e "require('node-llama-cpp'); console.log('node-llama-cpp OK')"; \
 	fi
 	@if [ "$(FLAVOR)" = "full" ]; then \
-		$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) ffmpeg -version 2>&1 | head -1; \
-		$(DOCKER) run --rm $(DOCKER_REPO):$(FLAVOR) npx playwright --version; \
+		$(DOCKER) run --rm --entrypoint python3 $(DOCKER_REPO):$(FLAVOR) -c "import pandas; print('pandas', pandas.__version__)"; \
+		$(DOCKER) run --rm --entrypoint python3 $(DOCKER_REPO):$(FLAVOR) -c "import matplotlib; print('matplotlib', matplotlib.__version__)"; \
+		$(DOCKER) run --rm --entrypoint python3 $(DOCKER_REPO):$(FLAVOR) -c "from PIL import Image; print('Pillow OK')"; \
+		$(DOCKER) run --rm --entrypoint ffmpeg $(DOCKER_REPO):$(FLAVOR) -version 2>&1 | head -1; \
+		$(DOCKER) run --rm --entrypoint npx $(DOCKER_REPO):$(FLAVOR) playwright --version; \
 	fi
 	@echo "==> $(FLAVOR) OK"
 

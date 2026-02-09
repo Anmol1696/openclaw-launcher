@@ -30,10 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - flavor: slim
+            tags-extra: ""
           - flavor: base
             tags-extra: latest
-          - flavor: lite
-            tags-extra: ""
           - flavor: full
             tags-extra: ""
 

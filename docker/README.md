@@ -1,55 +1,53 @@
 # OpenClaw Launcher Docker Images
 
-Multi-stage Dockerfile that extends the upstream
-[`ghcr.io/openclaw/openclaw`](https://github.com/openclaw/openclaw) image,
-strips build tooling (~940MB of compilers and dev headers), and layers on
-useful runtime tools.
+Slim Docker images that install OpenClaw directly via npm, bypassing the bloated
+4GB upstream image. Multi-stage build compiles native modules once, then copies
+only runtime artifacts to a minimal base.
 
 ## Flavors
 
 | Flavor | Target | What's included | Image size |
 |--------|--------|----------------|------------|
-| **base** | `base` | jq, ripgrep, fd, sqlite3 | 1.65 GB |
-| **lite** | `lite` | base + Python 3, pandas, matplotlib, Pillow | 1.96 GB |
-| **full** | `full` | lite + ffmpeg, Playwright + Chromium | 3.28 GB |
-| *upstream* | — | *build tools included, no extra CLI tools* | *2.59 GB* |
+| **slim** | `slim` | OpenClaw + jq, ripgrep, fd, sqlite3 | ~300 MB |
+| **base** | `base` | slim + node-llama-cpp (local LLM support) | ~500 MB |
+| **full** | `full` | base + Python 3, Playwright + Chromium, ffmpeg | ~1.2 GB |
 
-**base** is ~940MB smaller than upstream despite adding extra tools, because the
-multi-stage build copies only the built app into `node:22-bookworm-slim` and
-drops gcc, g++, bun, pnpm cache, and dev headers.
+**Recommended:** Use `base` for future-proof local LLM support, or `slim` if you
+only use cloud APIs and want the smallest possible image.
 
-## What's stripped from upstream
+## How it works
 
-The upstream image uses a single-stage build on `node:22-bookworm` (full
-Debian). It ships compilers and dev headers that are only needed during
-`pnpm install`:
+Instead of extending the 4GB upstream image, we:
 
-- GCC / G++ / CPP (~120 MB)
-- libicu-dev, libssl-dev, libglib2.0-dev (dev headers, ~60 MB)
-- Bun (~30 MB, only used for build scripts)
-- binutils (~30 MB)
-- Mercurial (~15 MB)
-- pnpm cache and source code
+1. **Builder stage**: Install build tools (cmake, clang) and compile native modules
+   - `openclaw` (~56MB npm package)
+   - `node-llama-cpp` (~30MB, requires compilation)
+   - `@napi-rs/canvas` (prebuilt binaries)
 
-Our multi-stage build copies only `/app/dist`, `/app/node_modules`, `/app/ui`,
-`/app/patches`, `/app/scripts`, and `package.json` into a slim base.
+2. **Runtime stage**: Copy only compiled modules to `node:22-bookworm-slim`
+   - No compilers, no dev headers, no build cache
+   - Just the runtime libs needed by native modules
+
+Result: **70% smaller** than upstream (500MB vs 4GB).
 
 ## Tool inventory
 
-### base
+### slim
 - **jq** — JSON processor (API responses, config manipulation)
 - **ripgrep** (`rg`) — fast recursive search
 - **fd** — fast file finder (aliased from `fd-find`)
 - **sqlite3** — embedded SQL database
 - **tini** — proper PID 1 signal handling
 
-### lite (includes base)
-- **Python 3** with pip and venv
+### base (includes slim)
+- **node-llama-cpp** — local LLM inference (CPU)
+- **libgomp1** — OpenMP runtime for parallel processing
+
+### full (includes base)
+- **Python 3** with pip
 - **pandas** — data analysis
 - **matplotlib** — charts and plots
 - **Pillow** — image processing
-
-### full (includes lite)
 - **ffmpeg** — video/audio/image conversion
 - **Playwright + Chromium** — headless browser automation
 
@@ -63,7 +61,7 @@ cd docker
 make help              # Show all targets
 
 make build             # Build base (default)
-make build FLAVOR=lite # Build lite
+make build FLAVOR=slim # Build slim
 make build-all         # Build all flavors
 
 make verify            # Verify base tools
@@ -73,12 +71,48 @@ make shell             # Shell into base
 make shell FLAVOR=full # Shell into full
 
 make run               # Run base (gateway on localhost:18789)
-make run FLAVOR=lite   # Run lite
+make run FLAVOR=slim   # Run slim
 
 make clean             # Remove all local images
 ```
 
-### Multi-arch
+### Raw docker commands
+
+```bash
+docker build --target slim -f docker/Dockerfile -t openclaw-launcher:slim .
+docker build --target base -f docker/Dockerfile -t openclaw-launcher:base .
+docker build --target full -f docker/Dockerfile -t openclaw-launcher:full .
+```
+
+### Check image sizes
+
+```bash
+docker images openclaw-launcher
+```
+
+## Using a flavor
+
+```bash
+# Shell launcher
+OPENCLAW_FLAVOR=base ./scripts/run.sh
+
+# Or set in environment
+export OPENCLAW_FLAVOR=slim
+./scripts/run.sh
+```
+
+## Verification
+
+```bash
+# Test gateway starts
+docker run --rm -p 18789:18789 openclaw-launcher:base
+# Visit http://localhost:18789
+
+# Test local LLM module loads (base/full only)
+docker run --rm openclaw-launcher:base node -e "require('node-llama-cpp')"
+```
+
+## Multi-arch
 
 ```bash
 make build-multiarch          # Validate multi-arch build (no load)
@@ -86,25 +120,3 @@ make build-multiarch-all      # Validate all flavors
 make push FLAVOR=base         # Build + push to GHCR (requires login)
 make push-all                 # Push all flavors
 ```
-
-### Raw docker commands
-
-```bash
-docker build --target base -f docker/Dockerfile -t openclaw-launcher:base .
-docker build --target lite -f docker/Dockerfile -t openclaw-launcher:lite .
-docker build --target full -f docker/Dockerfile -t openclaw-launcher:full .
-```
-
-## Using a flavor
-
-```bash
-# Shell launcher
-OPENCLAW_FLAVOR=full ./run.sh
-
-# Or set in environment
-export OPENCLAW_FLAVOR=lite
-./run.sh
-```
-
-The macOS app currently uses the upstream image. Custom flavor selection and
-bring-your-own-image support are coming in a future release via advanced settings.
