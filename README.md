@@ -16,37 +16,33 @@ Native SwiftUI app handles everything silently in the background.
 
 ---
 
+## Prerequisites
+
+- [**Docker Desktop**](https://www.docker.com/products/docker-desktop/) — required to run the OpenClaw container
+
 ## Quick Start
 
-### Option 1: Homebrew
+### Download (macOS)
+
+[**⬇️ Download OpenClawLauncher.dmg**](https://github.com/Anmol1696/openclaw-launcher/releases/download/v0.1.5-beta/OpenClawLauncher.dmg)
+
+1. Open the DMG and drag **OpenClawLauncher.app** to `/Applications`
+2. Double-click to launch
+
+### Alternative: Homebrew
 
 ```bash
 brew tap anmol1696/openclaw-launcher
 brew install --cask openclaw-launcher
-
-# Beta only: bypass Gatekeeper (not needed after v1)
-xattr -cr /Applications/OpenClawLauncher.app
 ```
 
-### Option 2: One-liner (macOS/Linux)
+### Alternative: One-liner (macOS/Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/scripts/run.sh | bash
 ```
 
 Requires: Docker, curl, python3, openssl
-
-### Option 3: Manual Download (macOS)
-
-1. **Download** the latest [`OpenClawLauncher.dmg`](https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
-2. **Open** the DMG and drag **OpenClawLauncher.app** to `/Applications`
-3. **First launch** — run this once in Terminal to bypass Gatekeeper:
-   ```bash
-   xattr -cr /Applications/OpenClawLauncher.app
-   ```
-   Then double-click the app normally.
-
-> **Note:** This is a beta release. Proper code signing is coming with v1 launch, after which no Terminal commands will be needed.
 
 ### Then...
 
