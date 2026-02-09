@@ -7,6 +7,7 @@ This directory contains planning documents for launcher improvements.
 | File | Description | Branch Suggestion |
 |------|-------------|-------------------|
 | [current-state.md](current-state.md) | Current architecture, features, gaps | N/A (reference) |
+| [ui-revamp.md](ui-revamp.md) | **Deep Ocean theme UI rebuild (100 tasks)** | `feat/ui-*` |
 | [distribution.md](distribution.md) | DMG signing, Sparkle auto-updates | `feat/distribution` |
 | [auth-improvements.md](auth-improvements.md) | OAuth URL scheme | `feat/oauth-url-scheme` |
 | [observability.md](observability.md) | Sentry, pull progress, log streaming | `feat/observability` |
@@ -34,24 +35,23 @@ This directory contains planning documents for launcher improvements.
 ### Phase 5: Production (2 hrs)
 - [ ] Sentry crash reporting (`observability.md`)
 
-### Phase 6: UI Revamp (TBD)
-- [ ] Settings window
-- [ ] Log viewer improvements
-- [ ] Dynamic menu bar icon
-- [ ] First-time onboarding polish
+### Phase 6: UI Revamp (~25 hrs)
+See [ui-revamp.md](ui-revamp.md) for detailed 100-task breakdown:
+- [ ] Foundation: Theme + base components
+- [ ] Main Window: 4 states (idle, starting, running, stopping)
+- [ ] Error States: Docker, pull, port, crash handling
+- [ ] Settings: Tabbed window (General, Container, Advanced)
+- [ ] Supporting: Logs, menu bar, modals
+- [ ] Onboarding: 3-step first-run wizard
+- [ ] Cleanup: Remove old UI, polish
 
 ---
 
 ## Deferred Items
 
-These items are blocked or deferred:
-
 | Item | Reason |
 |------|--------|
 | Notarization | Apple servers stuck "In Progress" |
-| Settings UI | Waiting for UI revamp |
-| Log streaming UI | Waiting for UI revamp |
-| Menu bar icon | Waiting for UI revamp |
 
 ---
 
@@ -60,21 +60,19 @@ These items are blocked or deferred:
 Each plan file can be worked on independently:
 
 ```bash
-# Distribution improvements
-git checkout -b feat/distribution
-# Work on distribution.md items
+# UI Revamp (in order)
+git checkout -b feat/ui-foundation    # Theme + base components
+git checkout -b feat/ui-main-states   # Main window states
+git checkout -b feat/ui-error-states  # Error handling
+git checkout -b feat/ui-settings      # Settings window
+git checkout -b feat/ui-supporting    # Logs, menu bar, modals
+git checkout -b feat/ui-onboarding    # First-run wizard
+git checkout -b feat/ui-polish        # Cleanup
 
-# OAuth URL scheme
-git checkout -b feat/oauth-url-scheme
-# Work on auth-improvements.md items
-
-# Observability
-git checkout -b feat/observability
-# Work on observability.md items
-
-# Settings
-git checkout -b feat/settings
-# Work on user-preferences.md items
+# Non-UI improvements
+git checkout -b feat/distribution     # DMG signing, Sparkle
+git checkout -b feat/oauth-url-scheme # Better auth flow
+git checkout -b feat/observability    # Sentry, pull progress
 ```
 
 ---
@@ -89,8 +87,14 @@ git checkout -b feat/settings
 | Distribution | Sparkle | 3-4 hrs |
 | Production | Sentry | 2 hrs |
 | **Total (non-UI)** | | **~10-12 hrs** |
-
-UI revamp effort is separate and TBD.
+| | | |
+| UI Foundation | Theme + components | 4-6 hrs |
+| UI Main Window | 4 states | 4-6 hrs |
+| UI Error States | Error handling | 2-3 hrs |
+| UI Settings | Tabbed window | 3-4 hrs |
+| UI Supporting | Logs, menu bar, modals | 4-5 hrs |
+| UI Onboarding | First-run wizard | 2-3 hrs |
+| **Total (UI)** | | **~20-27 hrs** |
 
 ---
 

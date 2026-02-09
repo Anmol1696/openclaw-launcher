@@ -31,10 +31,10 @@ public struct ProcessShellExecutor: ShellExecutor {
 
         try process.run()
 
-        let outData = try await Task.detached {
+        let outData = await Task.detached {
             stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         }.value
-        let errData = try await Task.detached {
+        let errData = await Task.detached {
             stderrPipe.fileHandleForReading.readDataToEndOfFile()
         }.value
 
@@ -67,7 +67,15 @@ public class OpenClawLauncher: ObservableObject {
     @Published public var showResetConfirm: Bool = false
     @Published public var needsDockerInstall: Bool = false
     @Published public var authExpiredBanner: String?
+    @Published public var lastError: LauncherError?
+    @Published public var activePort: Int = 18789  // The actual port being used (may be random)
 
+    // Resource limits (configurable via settings)
+    private var memoryLimit: String = "2g"
+    private var cpuLimit: String = "2.0"
+
+    /// Guards against concurrent start/stop operations to prevent race conditions
+    private var isOperationInProgress = false
     private var isFirstRun = false
     private var currentPKCE: AnthropicOAuth.PKCE?
     private var healthCheckTimer: Timer?
@@ -76,7 +84,7 @@ public class OpenClawLauncher: ObservableObject {
 
     private let containerName = "openclaw"
     private let imageName = "ghcr.io/openclaw/openclaw:latest"
-    private let port: Int = 18789
+    private let defaultPort: Int = 18789
     private var hasStarted = false
     private let shellExecutor: ShellExecutor
 
@@ -151,18 +159,83 @@ public class OpenClawLauncher: ObservableObject {
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
+    // MARK: - Configuration
+
+    /// Configure the port based on settings. Call this before starting the container.
+    public func configurePort(useRandomPort: Bool, customPort: Int) {
+        if useRandomPort {
+            activePort = findAvailablePort()
+            logger.info("Using random port: \(self.activePort)")
+        } else {
+            activePort = customPort
+            logger.info("Using custom port: \(self.activePort)")
+        }
+    }
+
+    /// Configure resource limits based on settings. Call this before starting the container.
+    public func configureResources(memoryLimit: String, cpuLimit: String) {
+        self.memoryLimit = memoryLimit
+        self.cpuLimit = cpuLimit
+        logger.info("Configured resources: memory=\(memoryLimit), cpu=\(cpuLimit)")
+    }
+
+    /// Find an available port in the ephemeral range (49152-65535)
+    public func findAvailablePort() -> Int {
+        // Try to find an available port by attempting to bind
+        for _ in 0..<100 {
+            let port = Int.random(in: 49152...65535)
+            if isPortAvailable(port) {
+                return port
+            }
+        }
+        // Fallback to default if we can't find one
+        logger.warning("Could not find available random port, using default")
+        return defaultPort
+    }
+
+    /// Check if a port is available by attempting to create a socket
+    private func isPortAvailable(_ port: Int) -> Bool {
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return false }
+        defer { close(socketFD) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port).bigEndian
+        addr.sin_addr.s_addr = INADDR_ANY
+
+        let bindResult = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        return bindResult == 0
+    }
+
     // MARK: - Public
 
     public func start() {
-        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted)")
+        logger.info("start() called, state=\(String(describing: self.state)), hasStarted=\(self.hasStarted), inProgress=\(self.isOperationInProgress)")
+
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("start() called while operation in progress, ignoring")
+            return
+        }
         guard !hasStarted || state == .stopped || state == .error else { return }
+
+        isOperationInProgress = true
         hasStarted = true
         steps = []
         needsDockerInstall = false
+        lastError = nil
         state = .working
         menuBarStatus = .starting
 
         Task {
+            defer { self.isOperationInProgress = false }
+
             do {
                 // Quick check: is the container already running from a previous session?
                 if await tryRecoverRunningContainer() { return }
@@ -181,9 +254,13 @@ public class OpenClawLauncher: ObservableObject {
 
                 try await continueAfterSetup()
             } catch {
-                if let launcherError = error as? LauncherError,
-                   case .dockerNotInstalled = launcherError {
-                    needsDockerInstall = true
+                if let launcherError = error as? LauncherError {
+                    lastError = launcherError
+                    if case .dockerNotInstalled = launcherError {
+                        needsDockerInstall = true
+                    }
+                } else {
+                    lastError = nil
                 }
                 addStep(.error, error.localizedDescription)
                 state = .error
@@ -218,6 +295,11 @@ public class OpenClawLauncher: ObservableObject {
                 for line in content.split(separator: "\n") {
                     if line.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
                         gatewayToken = String(line.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+                    } else if line.hasPrefix("OPENCLAW_PORT=") {
+                        if let port = Int(line.dropFirst("OPENCLAW_PORT=".count)) {
+                            activePort = port
+                            logger.info("tryRecoverRunningContainer: recovered port \(port)")
+                        }
                     }
                 }
             }
@@ -232,7 +314,17 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     public func stopContainer() {
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("stopContainer() called while operation in progress, ignoring")
+            return
+        }
+
+        isOperationInProgress = true
+
         Task {
+            defer { self.isOperationInProgress = false }
+
             addStep(.running, "Stopping OpenClaw...")
             _ = try? await shell("docker", "stop", containerName)
             addStep(.done, "Stopped.")
@@ -240,11 +332,21 @@ public class OpenClawLauncher: ObservableObject {
             uptimeTick = 0
             state = .stopped
             menuBarStatus = .stopped
+            hasStarted = false  // Allow restart after stop
             stopHealthCheck()
         }
     }
 
     public func restartContainer() async {
+        // Guard against concurrent operations
+        guard !isOperationInProgress else {
+            logger.warning("restartContainer() called while operation in progress, ignoring")
+            return
+        }
+
+        isOperationInProgress = true
+        defer { isOperationInProgress = false }
+
         addStep(.running, "Restarting...")
         menuBarStatus = .starting
         gatewayHealthy = false
@@ -419,7 +521,7 @@ public class OpenClawLauncher: ObservableObject {
             addStep(.done, "Opened Control UI in browser")
             return
         }
-        var urlString = "http://localhost:\(port)/openclaw"
+        var urlString = "http://localhost:\(activePort)/openclaw"
         if let token = gatewayToken {
             urlString += "?token=\(token)"
         }
@@ -437,6 +539,17 @@ public class OpenClawLauncher: ObservableObject {
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(nil)
         addStep(.done, "Opened logs in Terminal")
+    }
+
+    public func openDockerDownload() {
+        guard !suppressSideEffects else { return }
+        let url = URL(string: "https://www.docker.com/products/docker-desktop/")!
+        NSWorkspace.shared.open(url)
+    }
+
+    public func openDockerApp() {
+        guard !suppressSideEffects else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Docker.app"))
     }
 
     public func addStep(_ status: StepStatus, _ message: String) {
@@ -626,7 +739,7 @@ public class OpenClawLauncher: ObservableObject {
         gatewayToken = token
 
         // Write .env
-        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(port)\n"
+        let envContent = "OPENCLAW_GATEWAY_TOKEN=\(token)\nOPENCLAW_PORT=\(activePort)\n"
         try envContent.write(to: envFile, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envFile.path)
 
@@ -722,10 +835,10 @@ public class OpenClawLauncher: ObservableObject {
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  // writable /tmp, no exec
             "--tmpfs", "/home/node/.npm:rw,size=64m",      // npm might need this
 
-            // --- Resource limits ---
-            "--memory", "2g",                           // max 2GB RAM
-            "--memory-swap", "2g",                      // no swap
-            "--cpus", "2.0",                            // max 2 CPU cores
+            // --- Resource limits (from settings) ---
+            "--memory", memoryLimit,
+            "--memory-swap", memoryLimit,               // no swap beyond memory limit
+            "--cpus", cpuLimit,
             "--pids-limit", "256",                      // prevent fork bombs
 
             // --- Security ---
@@ -734,7 +847,7 @@ public class OpenClawLauncher: ObservableObject {
             "--security-opt", "no-new-privileges:true", // prevent privilege escalation
 
             // --- Network ---
-            "-p", "127.0.0.1:\(port):18789",           // LOCALHOST ONLY — not exposed to network
+            "-p", "127.0.0.1:\(activePort):18789",    // LOCALHOST ONLY — not exposed to network
 
             // --- Persistent state (mounted writable) ---
             "-v", "\(configDir.path):/home/node/.openclaw",
@@ -769,7 +882,7 @@ public class OpenClawLauncher: ObservableObject {
         addStep(.running, "Waiting for Gateway to be ready...")
         logger.info("waitForGateway: starting (max \(self.gatewayRetryCount) attempts)")
 
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(activePort)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5  // 5 second timeout per attempt
 
@@ -828,7 +941,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func checkGatewayHealth() async {
-        let url = URL(string: "http://127.0.0.1:\(port)/openclaw/")!
+        let url = URL(string: "http://127.0.0.1:\(activePort)/openclaw/")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
 
