@@ -33,20 +33,10 @@ public struct IdleContentView: View {
 
             Spacer()
 
-            // Center message
-            VStack(spacing: 12) {
-                Image(systemName: "play.circle")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundColor(Ocean.accent.opacity(0.6))
-
-                Text("Click Launch to start OpenClaw")
-                    .font(Ocean.ui(14))
-                    .foregroundColor(Ocean.textDim)
-
-                Text("All systems ready")
-                    .font(Ocean.ui(12))
-                    .foregroundColor(Ocean.textDim.opacity(0.7))
-            }
+            // Simple ready message
+            Text("All systems ready")
+                .font(Ocean.ui(14))
+                .foregroundColor(Ocean.textDim)
 
             Spacer()
         }

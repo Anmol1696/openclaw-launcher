@@ -27,6 +27,12 @@ public struct ProcessShellExecutor: ShellExecutor {
         ]
         let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+
+        // Use isolated Docker config to avoid credential helper triggering TCC permission dialogs
+        let dockerConfigDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".openclaw-launcher/.docker")
+        env["DOCKER_CONFIG"] = dockerConfigDir.path
+
         process.environment = env
 
         try process.run()
@@ -535,13 +541,16 @@ public class OpenClawLauncher: ObservableObject {
 
     public func viewLogs() {
         guard !suppressSideEffects else {
-            addStep(.done, "Opened logs in Terminal")
+            showLogSheet = true
             return
         }
-        let script = "tell application \"Terminal\" to do script \"docker logs -f \(containerName)\""
-        let appleScript = NSAppleScript(source: script)
-        appleScript?.executeAndReturnError(nil)
-        addStep(.done, "Opened logs in Terminal")
+        // Fetch latest logs and show in-app viewer
+        Task {
+            if let result = try? await shell("docker", "logs", "--tail", "500", containerName) {
+                containerLogs = result.stdout + result.stderr
+            }
+            showLogSheet = true
+        }
     }
 
     public func openDockerDownload() {
@@ -761,6 +770,18 @@ public class OpenClawLauncher: ObservableObject {
         return nil
     }
 
+    /// Ensure Docker config directory exists with isolated config (no credential helper).
+    /// This prevents TCC permission dialogs when docker-credential-desktop accesses keychain.
+    private func ensureDockerConfig() {
+        let dockerDir = stateDir.appendingPathComponent(".docker")
+        let dockerConfig = dockerDir.appendingPathComponent("config.json")
+
+        if !FileManager.default.fileExists(atPath: dockerConfig.path) {
+            try? FileManager.default.createDirectory(at: dockerDir, withIntermediateDirectories: true)
+            try? "{\n  \"auths\": {}\n}\n".write(to: dockerConfig, atomically: true, encoding: .utf8)
+        }
+    }
+
     private func firstRunSetup() async throws {
         migrateOldStateDir()
 
@@ -771,6 +792,8 @@ public class OpenClawLauncher: ObservableObject {
                 gatewayToken = token
                 logger.info("firstRunSetup: loaded existing token")
             }
+            // Ensure Docker config exists (may have been deleted)
+            ensureDockerConfig()
             addStep(.done, "Loaded existing configuration")
             return
         }
@@ -781,6 +804,9 @@ public class OpenClawLauncher: ObservableObject {
         // Create directories
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: workspaceDir, withIntermediateDirectories: true)
+
+        // Create isolated Docker config to avoid credential helper TCC dialogs
+        ensureDockerConfig()
 
         // Generate token
         let token = generateSecureToken()

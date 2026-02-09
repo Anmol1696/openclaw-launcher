@@ -75,6 +75,9 @@ public struct NewLauncherView: View {
                 }
             )
         }
+        .sheet(isPresented: $launcher.showLogSheet) {
+            LogViewerView(launcher: launcher)
+        }
     }
 
     // MARK: - Navigation Item

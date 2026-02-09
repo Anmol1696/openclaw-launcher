@@ -29,7 +29,7 @@ public struct RunningDashboardView: View {
 
             // Access URL Card
             AccessUrlCard(
-                url: "localhost:\(launcher.activePort)",
+                url: accessUrl,
                 onCopy: {
                     // Copy handled in component
                 },
@@ -63,6 +63,15 @@ public struct RunningDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Full access URL with path and token for display/copy
+    private var accessUrl: String {
+        var url = "http://localhost:\(launcher.activePort)/openclaw"
+        if let token = launcher.gatewayToken {
+            url += "?token=\(token)"
+        }
+        return url
     }
 
     // TODO: Get actual container stats from docker stats

@@ -46,7 +46,7 @@ public struct AccessUrlCard: View {
             HStack(spacing: 8) {
                 Button(action: {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("http://\(url)", forType: .string)
+                    NSPasteboard.general.setString(url, forType: .string)
                     copied = true
                     onCopy()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -101,7 +101,7 @@ public struct AccessUrlCard: View {
 struct AccessUrlCard_Previews: PreviewProvider {
     static var previews: some View {
         AccessUrlCard(
-            url: "localhost:3000",
+            url: "http://localhost:3000/openclaw?token=abc123",
             onCopy: {},
             onOpen: {}
         )

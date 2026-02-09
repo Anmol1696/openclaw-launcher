@@ -83,6 +83,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>OpenClaw Launcher uses Docker to run containers.</string>
 </dict>
 </plist>
 PLIST
