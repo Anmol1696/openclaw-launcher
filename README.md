@@ -24,7 +24,7 @@ Native SwiftUI app handles everything silently in the background.
 
 ### Download (macOS)
 
-[**⬇️ Download OpenClawLauncher.dmg**](https://github.com/Anmol1696/openclaw-launcher/releases/download/v0.1.5-beta/OpenClawLauncher.dmg)
+[**⬇️ Download OpenClawLauncher.dmg**](https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
 
 1. Open the DMG and drag **OpenClawLauncher.app** to `/Applications`
 2. Double-click to launch

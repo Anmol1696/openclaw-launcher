@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw Launcher</title>
+    <meta name="description" content="Run your AI agent locally. No terminal required. Just double-click and start chatting.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>">
+    <style>
+        :root {
+            --bg: #0a0f1a;
+            --surface: #0f1629;
+            --card: #151d35;
+            --accent: #00d4aa;
+            --accent-glow: #00ffcc;
+            --accent-dim: rgba(0, 212, 170, 0.15);
+            --text: #e8f4f8;
+            --text-dim: #6b8a99;
+            --border: rgba(0, 212, 170, 0.2);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 520px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 5rem;
+            margin-bottom: 1rem;
+            filter: drop-shadow(0 0 20px rgba(0, 212, 170, 0.3));
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), var(--accent-glow));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .tagline {
+            color: var(--text-dim);
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+            line-height: 1.5;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: linear-gradient(135deg, var(--accent), #00a080);
+            color: var(--bg);
+            font-size: 1.1rem;
+            font-weight: 600;
+            padding: 1rem 2rem;
+            border-radius: 10px;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 30px rgba(0, 212, 170, 0.4);
+        }
+
+        .download-btn svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .version {
+            display: inline-block;
+            margin-top: 0.75rem;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-top: 2.5rem;
+            text-align: left;
+        }
+
+        .card h2 {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .step-num {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .step-text {
+            color: var(--text);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .step-text a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .step-text a:hover {
+            text-decoration: underline;
+        }
+
+        .prereq {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin-top: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .prereq-icon {
+            font-size: 1.5rem;
+        }
+
+        .prereq-text {
+            font-size: 0.9rem;
+            color: var(--text-dim);
+        }
+
+        .prereq-text a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .prereq-text a:hover {
+            text-decoration: underline;
+        }
+
+        .footer {
+            margin-top: 3rem;
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+        }
+
+        .footer a {
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.2s;
+        }
+
+        .footer a:hover {
+            color: var(--accent);
+        }
+
+        .badge {
+            display: inline-block;
+            background: var(--accent-dim);
+            color: var(--accent);
+            font-size: 0.75rem;
+            font-weight: 500;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+
+        @media (max-width: 480px) {
+            .logo {
+                font-size: 4rem;
+            }
+            h1 {
+                font-size: 1.5rem;
+            }
+            .tagline {
+                font-size: 1rem;
+            }
+            .download-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🐙</div>
+        <h1>OpenClaw Launcher</h1>
+        <p class="tagline">
+            Run your AI agent locally. No terminal required.<br>
+            Just double-click and start chatting.
+        </p>
+
+        <a href="https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg" class="download-btn">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+            </svg>
+            Download for macOS
+        </a>
+        <span class="version" id="version">loading...</span>
+
+    <script>
+        fetch('https://api.github.com/repos/Anmol1696/openclaw-launcher/releases/latest')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('version').textContent = data.tag_name;
+            })
+            .catch(() => {
+                document.getElementById('version').textContent = '';
+            });
+    </script>
+
+        <div class="prereq">
+            <span class="prereq-icon">🐳</span>
+            <span class="prereq-text">
+                Requires <a href="https://www.docker.com/products/docker-desktop/" target="_blank">Docker Desktop</a>
+            </span>
+        </div>
+
+        <div class="card">
+            <h2>Getting Started</h2>
+            <div class="steps">
+                <div class="step">
+                    <span class="step-num">1</span>
+                    <span class="step-text">Open the DMG and drag the app to Applications</span>
+                </div>
+                <div class="step">
+                    <span class="step-num">2</span>
+                    <span class="step-text">Double-click OpenClawLauncher to start</span>
+                </div>
+                <div class="step">
+                    <span class="step-num">3</span>
+                    <span class="step-text">Sign in with your AI provider and start chatting</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <a href="https://github.com/Anmol1696/openclaw-launcher">GitHub</a>
+            <a href="https://github.com/Anmol1696/openclaw-launcher#readme">Documentation</a>
+            <a href="https://github.com/Anmol1696/openclaw-launcher/releases">All Releases</a>
+        </div>
+    </div>
+</body>
+</html>
