@@ -238,3 +238,7 @@ Nothing to edit in files or Terminal. All in the browser.
 | Can't connect to UI      | `docker ps` — ensure port 18789 is free  |
 | Lost gateway token       | `cat ~/.openclaw-launcher/.env`          |
 | Want to start fresh      | Delete `~/.openclaw-launcher/` folder    |
+
+---
+
+Powered by [Constructive](https://constructive.io)
