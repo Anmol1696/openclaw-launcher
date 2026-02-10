@@ -14,6 +14,8 @@ No Terminal. No Node.js. No PATH issues. No CLI.
 
 Native SwiftUI app handles everything silently in the background.
 
+Powered by [Constructive](https://constructive.io)
+
 ---
 
 ## Prerequisites
