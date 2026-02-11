@@ -233,7 +233,8 @@ public struct NewLauncherView: View {
                     time = nil
                 case .running:
                     status = .active
-                    time = nil
+                    // Show pull progress for the "Container image" step
+                    time = mapping.label == "Container image" ? launcher.pullProgressText : nil
                 case .error:
                     status = .error
                     time = "failed"
