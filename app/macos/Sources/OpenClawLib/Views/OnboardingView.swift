@@ -248,8 +248,13 @@ private struct DockerCheckStep: View {
                         onContinue()
                     }
                 case .notInstalled:
-                    OceanButton("Download Docker", icon: "⬇", variant: .primary) {
-                        onDownload()
+                    HStack(spacing: 8) {
+                        OceanButton("Download Docker", icon: "⬇", variant: .primary) {
+                            onDownload()
+                        }
+                        OceanButton("Check Again", icon: "↻", variant: .secondary) {
+                            onRetry()
+                        }
                     }
                 case .notRunning:
                     HStack(spacing: 8) {
