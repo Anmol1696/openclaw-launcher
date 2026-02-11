@@ -678,13 +678,16 @@ public class OpenClawLauncher: ObservableObject {
     private func checkDocker() async throws {
         addStep(.running, "Checking Docker...")
 
-        // Direct filesystem check — no PATH dependency
-        let dockerBinary = DockerPaths.findDockerBinary()
-        let dockerApp = DockerPaths.findInstalledApp()
+        // In production, use direct filesystem checks (no PATH dependency).
+        // In tests (suppressSideEffects), skip filesystem checks and rely on
+        // the mock shell executor for docker info.
+        if !suppressSideEffects {
+            let dockerBinary = DockerPaths.findDockerBinary()
+            let dockerApp = DockerPaths.findInstalledApp()
 
-        // If neither a binary nor an app bundle exists, prompt user to install
-        if dockerBinary == nil && dockerApp == nil {
-            throw LauncherError.dockerNotInstalled
+            if dockerBinary == nil && dockerApp == nil {
+                throw LauncherError.dockerNotInstalled
+            }
         }
 
         let result = try? await shell("docker", "info")
