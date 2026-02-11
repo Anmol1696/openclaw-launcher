@@ -18,22 +18,7 @@ public struct ProcessShellExecutor: ShellExecutor {
         process.arguments = args
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
-        var env = ProcessInfo.processInfo.environment
-        let extraPaths = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/Applications/Docker.app/Contents/Resources/bin",
-        ]
-        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-
-        // Use isolated Docker config to avoid credential helper triggering TCC permission dialogs
-        let dockerConfigDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".openclaw-launcher/.docker")
-        env["DOCKER_CONFIG"] = dockerConfigDir.path
-
-        process.environment = env
+        process.environment = DockerPaths.augmentedEnvironment()
 
         try process.run()
 
@@ -693,16 +678,16 @@ public class OpenClawLauncher: ObservableObject {
     private func checkDocker() async throws {
         addStep(.running, "Checking Docker...")
 
-        // Check if docker CLI exists at all
-        let which = try? await shell("which", "docker")
-        let dockerCliExists = which?.exitCode == 0
+        // In production, use direct filesystem checks (no PATH dependency).
+        // In tests (suppressSideEffects), skip filesystem checks and rely on
+        // the mock shell executor for docker info.
+        if !suppressSideEffects {
+            let dockerBinary = DockerPaths.findDockerBinary()
+            let dockerApp = DockerPaths.findInstalledApp()
 
-        // Check if Docker.app is installed
-        let dockerAppExists = FileManager.default.fileExists(atPath: "/Applications/Docker.app")
-
-        // If neither exists, prompt user to install
-        if !dockerCliExists && !dockerAppExists {
-            throw LauncherError.dockerNotInstalled
+            if dockerBinary == nil && dockerApp == nil {
+                throw LauncherError.dockerNotInstalled
+            }
         }
 
         let result = try? await shell("docker", "info")
