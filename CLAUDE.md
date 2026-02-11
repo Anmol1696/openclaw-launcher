@@ -89,3 +89,8 @@ The app is split into a library target (`OpenClawLib`) and an executable target 
 - Gateway token is auto-generated on first run and stored in `~/.openclaw-launcher/.env`
 - Dashboard/setup split: running state shows dashboard with health + actions; setup state shows progress bar
 - Menu bar extra provides persistent status indicator and quick actions even when window is closed
+
+## Workflow Rules
+
+- **Never push to remote** — commit locally only, user handles pushing
+- **Never add Co-Authored-By** — no Claude co-author lines in commits
