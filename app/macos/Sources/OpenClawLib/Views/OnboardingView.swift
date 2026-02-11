@@ -82,9 +82,11 @@ public struct OnboardingView: View {
         dockerStatus = .checking
 
         Task {
-            // Check if Docker CLI exists
-            let whichResult = await runCommand("which docker")
-            guard whichResult.exitCode == 0 else {
+            // Direct filesystem check — no PATH dependency
+            let dockerBinary = DockerPaths.findDockerBinary()
+            let dockerApp = DockerPaths.findInstalledApp()
+
+            guard dockerBinary != nil || dockerApp != nil else {
                 await MainActor.run { dockerStatus = .notInstalled }
                 return
             }
@@ -92,11 +94,7 @@ public struct OnboardingView: View {
             // Check if Docker daemon is running
             let infoResult = await runCommand("docker info")
             await MainActor.run {
-                if infoResult.exitCode == 0 {
-                    dockerStatus = .installed
-                } else {
-                    dockerStatus = .notRunning
-                }
+                dockerStatus = infoResult.exitCode == 0 ? .installed : .notRunning
             }
         }
     }
@@ -109,6 +107,7 @@ public struct OnboardingView: View {
         process.arguments = ["-c", command]
         process.standardOutput = pipe
         process.standardError = pipe
+        process.environment = DockerPaths.augmentedEnvironment()
 
         do {
             try process.run()
