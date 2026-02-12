@@ -839,13 +839,21 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Pulling latest image... this may take a moment")
+        addStep(.running, "Pulling latest image... first time may take a few minutes")
         pullProgressText = nil
 
-        let pull = try await shell("docker", "pull", imageName)
+        let pullExitCode: Int
+        if suppressSideEffects {
+            // In tests, use the mock shell executor
+            let pull = try await shell("docker", "pull", imageName)
+            pullExitCode = pull.exitCode
+        } else {
+            // In production, stream progress from docker pull
+            pullExitCode = Int(await pullImageWithProgress(imageName))
+        }
         pullProgressText = nil
 
-        if pull.exitCode == 0 {
+        if pullExitCode == 0 {
             addStep(.done, "Docker image up to date")
             return
         }
@@ -857,7 +865,137 @@ public class OpenClawLauncher: ObservableObject {
             return
         }
 
-        throw LauncherError.pullFailed(pull.stderr.isEmpty ? "Image pull failed" : pull.stderr)
+        throw LauncherError.pullFailed("Image pull failed (exit code \(pullExitCode))")
+    }
+
+    /// Streams `docker pull` output and updates `pullProgressText` with download progress.
+    /// Uses `--progress=plain` for predictable newline-delimited output across Docker versions.
+    /// Progress text is purely cosmetic — exit code alone determines success/failure.
+    private func pullImageWithProgress(_ image: String) async -> Int32 {
+        let process = Process()
+        let outputPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["docker", "pull", "--progress=plain", image]
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe  // merge stderr into same pipe
+        process.environment = DockerPaths.augmentedEnvironment()
+
+        do {
+            try process.run()
+        } catch {
+            logger.error("pullImageWithProgress: failed to start: \(error.localizedDescription)")
+            return -1
+        }
+
+        // Read output incrementally — purely cosmetic, failures are silent
+        let progressTask = Task.detached { [weak self] () -> Void in
+            let handle = outputPipe.fileHandleForReading
+            var buffer = Data()
+
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }  // EOF
+                buffer.append(chunk)
+
+                if let text = String(data: buffer, encoding: .utf8) {
+                    let summary = Self.parsePullProgress(text)
+                    if let summary = summary {
+                        await MainActor.run { [weak self] in
+                            self?.pullProgressText = summary
+                        }
+                    }
+                }
+            }
+        }
+
+        process.waitUntilExit()
+        progressTask.cancel()
+
+        return process.terminationStatus
+    }
+
+    /// Parse docker pull output to produce a human-readable progress summary.
+    /// With `--progress=plain`, output is newline-delimited:
+    ///   "abc123: Downloading  50.12MB / 400MB"
+    ///   "abc123: Download complete"
+    /// Returns nil if nothing parseable (graceful fallback to static hint).
+    nonisolated static func parsePullProgress(_ output: String) -> String? {
+        let allLines = output.components(separatedBy: .newlines)
+
+        var totalDownloaded: Double = 0
+        var totalSize: Double = 0
+        var downloadingCount = 0
+        var doneCount = 0
+        var extractingCount = 0
+
+        for line in allLines {
+            if line.contains("Downloading") {
+                downloadingCount += 1
+                if let (downloaded, size) = parseSizeFromLine(line) {
+                    totalDownloaded += downloaded
+                    totalSize += size
+                }
+            } else if line.contains("Download complete") || line.contains("Already exists") || line.contains("Pull complete") {
+                doneCount += 1
+            } else if line.contains("Extracting") {
+                extractingCount += 1
+            }
+        }
+
+        if extractingCount > 0 {
+            return "Extracting layers..."
+        }
+        if downloadingCount > 0 && totalSize > 0 {
+            return "Downloading \(formatBytes(totalDownloaded)) / \(formatBytes(totalSize))"
+        }
+        if downloadingCount > 0 {
+            return "Downloading..."
+        }
+        if doneCount > 0 {
+            return "\(doneCount) layers complete"
+        }
+        return nil
+    }
+
+    /// Parse "50.12MB/400MB" or "50.12kB/400kB" from a docker pull line.
+    private nonisolated static func parseSizeFromLine(_ line: String) -> (Double, Double)? {
+        // Match patterns like "123.45MB/678.9MB" or "123.45kB/678.9kB"
+        let pattern = #"([\d.]+)\s*(kB|MB|GB)/([\d.]+)\s*(kB|MB|GB)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              match.numberOfRanges >= 5 else { return nil }
+
+        func extract(_ idx: Int) -> String? {
+            guard let range = Range(match.range(at: idx), in: line) else { return nil }
+            return String(line[range])
+        }
+
+        guard let downloadedStr = extract(1), let downloadedUnit = extract(2),
+              let sizeStr = extract(3), let sizeUnit = extract(4),
+              let downloaded = Double(downloadedStr), let size = Double(sizeStr) else { return nil }
+
+        return (toBytes(downloaded, unit: downloadedUnit), toBytes(size, unit: sizeUnit))
+    }
+
+    private nonisolated static func toBytes(_ value: Double, unit: String) -> Double {
+        switch unit {
+        case "kB": return value * 1_000
+        case "MB": return value * 1_000_000
+        case "GB": return value * 1_000_000_000
+        default: return value
+        }
+    }
+
+    private nonisolated static func formatBytes(_ bytes: Double) -> String {
+        if bytes >= 1_000_000_000 {
+            return String(format: "%.1f GB", bytes / 1_000_000_000)
+        } else if bytes >= 1_000_000 {
+            return String(format: "%.0f MB", bytes / 1_000_000)
+        } else if bytes >= 1_000 {
+            return String(format: "%.0f kB", bytes / 1_000)
+        }
+        return "\(Int(bytes)) B"
     }
 
     private func runContainer() async throws {
