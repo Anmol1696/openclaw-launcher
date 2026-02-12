@@ -839,7 +839,7 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Pulling latest image... this may take a moment")
+        addStep(.running, "Pulling latest image... first time may take a few minutes")
         pullProgressText = nil
 
         let pullExitCode: Int
@@ -869,26 +869,28 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     /// Streams `docker pull` output and updates `pullProgressText` with download progress.
+    /// Uses `--progress=plain` for predictable newline-delimited output across Docker versions.
+    /// Progress text is purely cosmetic — exit code alone determines success/failure.
     private func pullImageWithProgress(_ image: String) async -> Int32 {
         let process = Process()
-        let stderrPipe = Pipe()
+        let outputPipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["docker", "pull", image]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = stderrPipe
+        process.arguments = ["docker", "pull", "--progress=plain", image]
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe  // merge stderr into same pipe
         process.environment = DockerPaths.augmentedEnvironment()
 
         do {
             try process.run()
         } catch {
-            logger.error("pullImageWithProgress: failed to start process: \(error.localizedDescription)")
+            logger.error("pullImageWithProgress: failed to start: \(error.localizedDescription)")
             return -1
         }
 
-        // Read stderr incrementally in background and parse progress
+        // Read output incrementally — purely cosmetic, failures are silent
         let progressTask = Task.detached { [weak self] () -> Void in
-            let handle = stderrPipe.fileHandleForReading
+            let handle = outputPipe.fileHandleForReading
             var buffer = Data()
 
             while true {
@@ -896,7 +898,6 @@ public class OpenClawLauncher: ObservableObject {
                 if chunk.isEmpty { break }  // EOF
                 buffer.append(chunk)
 
-                // Parse complete lines from buffer
                 if let text = String(data: buffer, encoding: .utf8) {
                     let summary = Self.parsePullProgress(text)
                     if let summary = summary {
@@ -914,12 +915,13 @@ public class OpenClawLauncher: ObservableObject {
         return process.terminationStatus
     }
 
-    /// Parse docker pull stderr output to produce a human-readable progress summary.
-    /// Docker pull output has lines like: "abc123: Downloading  [===>   ]  50.12MB/400MB"
-    /// We aggregate all "Downloading" layers into a total.
+    /// Parse docker pull output to produce a human-readable progress summary.
+    /// With `--progress=plain`, output is newline-delimited:
+    ///   "abc123: Downloading  50.12MB / 400MB"
+    ///   "abc123: Download complete"
+    /// Returns nil if nothing parseable (graceful fallback to static hint).
     nonisolated static func parsePullProgress(_ output: String) -> String? {
-        let lines = output.split(separator: "\r").last.map { String($0) } ?? output
-        let allLines = lines.split(separator: "\n")
+        let allLines = output.components(separatedBy: .newlines)
 
         var totalDownloaded: Double = 0
         var totalSize: Double = 0
@@ -928,17 +930,15 @@ public class OpenClawLauncher: ObservableObject {
         var extractingCount = 0
 
         for line in allLines {
-            let s = String(line)
-            if s.contains("Downloading") {
+            if line.contains("Downloading") {
                 downloadingCount += 1
-                // Parse "50.12MB/400MB" from the line
-                if let (downloaded, size) = parseSizeFromLine(s) {
+                if let (downloaded, size) = parseSizeFromLine(line) {
                     totalDownloaded += downloaded
                     totalSize += size
                 }
-            } else if s.contains("Download complete") || s.contains("Already exists") || s.contains("Pull complete") {
+            } else if line.contains("Download complete") || line.contains("Already exists") || line.contains("Pull complete") {
                 doneCount += 1
-            } else if s.contains("Extracting") {
+            } else if line.contains("Extracting") {
                 extractingCount += 1
             }
         }
