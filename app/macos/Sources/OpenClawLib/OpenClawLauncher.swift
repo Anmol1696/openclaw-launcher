@@ -237,10 +237,9 @@ public class OpenClawLauncher: ObservableObject {
                 // Check for expired OAuth tokens and attempt refresh
                 await refreshOAuthIfNeeded()
 
-                // Pause for auth on first run
+                // Note if no auth configured (non-blocking - user can configure in Control UI)
                 if isFirstRun && !authProfileExists() && !oauthCredentialsExist() {
-                    state = .needsAuth
-                    return
+                    addStep(.warning, "No model auth configured — set up in Control UI")
                 }
 
                 try await continueAfterSetup()
