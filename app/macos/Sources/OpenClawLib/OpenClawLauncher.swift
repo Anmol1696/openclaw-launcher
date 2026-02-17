@@ -839,8 +839,8 @@ public class OpenClawLauncher: ObservableObject {
     }
 
     private func ensureImage() async throws {
-        addStep(.running, "Pulling latest image... this may take a moment")
-        pullProgressText = nil
+        addStep(.running, "Pulling latest image...")
+        pullProgressText = "Downloading Docker image... this may take several minutes"
 
         let pull = try await shell("docker", "pull", imageName)
         pullProgressText = nil
