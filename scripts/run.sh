@@ -5,7 +5,7 @@
 #  Control UI opens in your browser at http://localhost:18789
 #
 #  Usage:
-#    curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/run.sh | bash
+#    curl -fsSL https://raw.githubusercontent.com/constructive-io/openclaw-launcher/main/run.sh | bash
 #
 #  Or clone and run:
 #    ./run.sh           # Start
@@ -20,7 +20,7 @@ set -euo pipefail
 # --- Config ---
 VERSION="1.0.0"
 CONTAINER_NAME="openclaw"
-IMAGE_NAME="ghcr.io/anmol1696/openclaw-launcher:${OPENCLAW_FLAVOR:-base}"
+IMAGE_NAME="ghcr.io/constructive-io/openclaw-launcher:${OPENCLAW_FLAVOR:-base}"
 STATE_DIR="$HOME/.openclaw-launcher"
 CONFIG_DIR="$STATE_DIR/config"
 WORKSPACE_DIR="$STATE_DIR/workspace"

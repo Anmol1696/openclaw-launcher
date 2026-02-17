@@ -8,7 +8,7 @@ All Docker configuration is hardcoded:
 
 | Setting | Value | Location |
 |---------|-------|----------|
-| Image | `ghcr.io/anmol1696/openclaw-launcher:base` | `OpenClawLauncher.swift:24` |
+| Image | `ghcr.io/constructive-io/openclaw-launcher:base` | `OpenClawLauncher.swift:24` |
 | Memory | `2g` | `OpenClawLauncher.swift:551` |
 | Memory swap | `2g` (no swap) | `OpenClawLauncher.swift:552` |
 | CPUs | `2.0` | `OpenClawLauncher.swift:553` |
@@ -111,7 +111,7 @@ Available when preset is Custom, or as overrides on any preset.
 
 ```json
 {
-  "image": "ghcr.io/anmol1696/openclaw-launcher:base",
+  "image": "ghcr.io/constructive-io/openclaw-launcher:base",
   "preset": "standard",
   "resources": {
     "memory": "2g",
@@ -131,7 +131,7 @@ Available when preset is Custom, or as overrides on any preset.
 Extend with env vars matching each setting:
 
 ```bash
-IMAGE_NAME="ghcr.io/anmol1696/openclaw-launcher:${OPENCLAW_FLAVOR:-base}"
+IMAGE_NAME="ghcr.io/constructive-io/openclaw-launcher:${OPENCLAW_FLAVOR:-base}"
 MEMORY="${OPENCLAW_MEMORY:-2g}"
 CPUS="${OPENCLAW_CPUS:-2.0}"
 PIDS_LIMIT="${OPENCLAW_PIDS_LIMIT:-256}"

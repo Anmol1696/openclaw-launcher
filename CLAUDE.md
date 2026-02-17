@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-OpenClaw Desktop is a native macOS launcher for the OpenClaw AI Gateway. Users double-click the app, it pulls the Docker image (`ghcr.io/anmol1696/openclaw-launcher:base`), runs it in lockdown mode, and opens the Control UI in the browser. No terminal interaction required.
+OpenClaw Desktop is a native macOS launcher for the OpenClaw AI Gateway. Users double-click the app, it pulls the Docker image (`ghcr.io/constructive-io/openclaw-launcher:base`), runs it in lockdown mode, and opens the Control UI in the browser. No terminal interaction required.
 
 ## Repository Structure
 
@@ -67,7 +67,7 @@ The app is split into a library target (`OpenClawLib`) and an executable target 
 **OpenClawLauncher.swift** — `@MainActor ObservableObject` viewmodel:
 1. `checkDocker()` — validates Docker; auto-installs and starts Docker Desktop on macOS (90s timeout)
 2. `firstRunSetup()` — migrates old state dir, generates 64-char hex token, creates `~/.openclaw-launcher/` with `.env` and `openclaw.json`
-3. `ensureImage()` — `docker pull ghcr.io/anmol1696/openclaw-launcher:base`
+3. `ensureImage()` — `docker pull ghcr.io/constructive-io/openclaw-launcher:base`
 4. `runContainer()` — launches container with lockdown security flags
 5. `waitForGateway()` — polls `localhost:18789` (30 attempts, 1s apart)
 6. Health check system: `startHealthCheck()` / `stopHealthCheck()` / `checkGatewayHealth()` with 5s polling
@@ -77,7 +77,7 @@ The app is split into a library target (`OpenClawLib`) and an executable target 
 
 **AnthropicOAuth.swift** — PKCE OAuth flow for Anthropic sign-in
 
-**Docker image**: Custom images extending upstream `ghcr.io/openclaw/openclaw:latest` — built from `docker/` dir in three flavors (base, lite, full). Published to `ghcr.io/anmol1696/openclaw-launcher:<flavor>`. Lockdown security flags applied at `docker run` time.
+**Docker image**: Custom images extending upstream `ghcr.io/openclaw/openclaw:latest` — built from `docker/` dir in three flavors (base, lite, full). Published to `ghcr.io/constructive-io/openclaw-launcher:<flavor>`. Lockdown security flags applied at `docker run` time.
 
 **User data** persists in `~/.openclaw-launcher/` with subdirs `config/` and `workspace/`, mounted into the container.
 

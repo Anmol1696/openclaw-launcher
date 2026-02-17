@@ -1,5 +1,5 @@
 DOCKER        := $(shell which docker)
-DOCKER_REPO   := ghcr.io/anmol1696/openclaw-launcher
+DOCKER_REPO   := ghcr.io/constructive-io/openclaw-launcher
 DOCKERFILE    := $(CURDIR)/Dockerfile
 CONTEXT       := $(CURDIR)/..
 PLATFORMS     := linux/amd64,linux/arm64

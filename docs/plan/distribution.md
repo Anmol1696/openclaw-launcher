@@ -149,7 +149,7 @@ Divider()
 Add to Info.plist generation:
 ```xml
 <key>SUFeedURL</key>
-<string>https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/appcast.xml</string>
+<string>https://raw.githubusercontent.com/constructive-io/openclaw-launcher/main/appcast.xml</string>
 <key>SUPublicEDKey</key>
 <string>YOUR_ED25519_PUBLIC_KEY</string>
 ```
@@ -163,7 +163,7 @@ Add to Info.plist generation:
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>OpenClaw Launcher</title>
-    <link>https://github.com/Anmol1696/openclaw-launcher</link>
+    <link>https://github.com/constructive-io/openclaw-launcher</link>
     <description>OpenClaw Launcher Updates</description>
     <language>en</language>
     <item>
@@ -172,7 +172,7 @@ Add to Info.plist generation:
       <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
       <pubDate>Mon, 03 Feb 2026 12:00:00 +0000</pubDate>
       <enclosure
-        url="https://github.com/Anmol1696/openclaw-launcher/releases/download/v1.0.0/OpenClawLauncher.dmg"
+        url="https://github.com/constructive-io/openclaw-launcher/releases/download/v1.0.0/OpenClawLauncher.dmg"
         sparkle:edSignature="SIGNATURE_HERE"
         length="12345678"
         type="application/octet-stream"/>
@@ -209,11 +209,11 @@ Medium-High (3-4 hrs)
 ## 3. Homebrew Cask
 
 ### Current State
-Tap exists at `Anmol1696/homebrew-openclaw-launcher` and is auto-updated by CI.
+Tap exists at `constructive-io/homebrew-openclaw-launcher` and is auto-updated by CI.
 
 ### Usage
 ```bash
-brew tap Anmol1696/openclaw-launcher
+brew tap constructive-io/openclaw-launcher
 brew install --cask openclaw-launcher
 ```
 

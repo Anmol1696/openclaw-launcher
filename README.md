@@ -1,9 +1,9 @@
 # OpenClaw Launcher 🐙
 
-[![Build macOS App](https://github.com/Anmol1696/openclaw-launcher/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Anmol1696/openclaw-launcher/actions/workflows/build-macos.yml)
-[![Release](https://img.shields.io/github/v/release/Anmol1696/openclaw-launcher?label=release)](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
-[![License](https://img.shields.io/github/license/Anmol1696/openclaw-launcher)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)](https://github.com/Anmol1696/openclaw-launcher/releases/latest)
+[![Build macOS App](https://github.com/constructive-io/openclaw-launcher/actions/workflows/build-macos.yml/badge.svg)](https://github.com/constructive-io/openclaw-launcher/actions/workflows/build-macos.yml)
+[![Release](https://img.shields.io/github/v/release/constructive-io/openclaw-launcher?label=release)](https://github.com/constructive-io/openclaw-launcher/releases/latest)
+[![License](https://img.shields.io/github/license/constructive-io/openclaw-launcher)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)](https://github.com/constructive-io/openclaw-launcher/releases/latest)
 [![Swift](https://img.shields.io/badge/Swift-5.9-orange?logo=swift)](https://swift.org)
 
 > **Beta** — UI and features are actively evolving.
@@ -26,7 +26,7 @@ Powered by [Constructive](https://constructive.io)
 
 ### Download (macOS)
 
-[**⬇️ Download OpenClawLauncher.dmg**](https://github.com/Anmol1696/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
+[**⬇️ Download OpenClawLauncher.dmg**](https://github.com/constructive-io/openclaw-launcher/releases/latest/download/OpenClawLauncher.dmg)
 
 1. Open the DMG and drag **OpenClawLauncher.app** to `/Applications`
 2. Double-click to launch
@@ -34,14 +34,14 @@ Powered by [Constructive](https://constructive.io)
 ### Alternative: Homebrew
 
 ```bash
-brew tap anmol1696/openclaw-launcher
+brew tap constructive-io/openclaw-launcher
 brew install --cask openclaw-launcher
 ```
 
 ### Alternative: One-liner (macOS/Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Anmol1696/openclaw-launcher/main/scripts/run.sh | bash
+curl -fsSL https://raw.githubusercontent.com/constructive-io/openclaw-launcher/main/scripts/run.sh | bash
 ```
 
 Requires: Docker, curl, python3, openssl

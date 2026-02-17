@@ -205,7 +205,7 @@ jobs:
       - name: Checkout homebrew tap
         uses: actions/checkout@v4
         with:
-          repository: Anmol1696/homebrew-openclaw-launcher
+          repository: constructive-io/homebrew-openclaw-launcher
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Update cask
@@ -218,10 +218,10 @@ jobs:
             version "${VERSION}"
             sha256 "${SHA256}"
 
-            url "https://github.com/Anmol1696/openclaw-launcher/releases/download/v#{version}/OpenClawLauncher.dmg"
+            url "https://github.com/constructive-io/openclaw-launcher/releases/download/v#{version}/OpenClawLauncher.dmg"
             name "OpenClaw Launcher"
             desc "Native macOS launcher for OpenClaw AI Gateway"
-            homepage "https://github.com/Anmol1696/openclaw-launcher"
+            homepage "https://github.com/constructive-io/openclaw-launcher"
 
             depends_on macos: ">= :sonoma"
 
